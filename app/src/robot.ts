@@ -1,6 +1,6 @@
 import { Container, Sprite, Texture } from "pixi.js";
 
-import type { AvatarState, TokenData } from "@opencode-avatar/shared/src/protocol.js";
+import type { AvatarState, TokenData } from "@opencode-avatar/shared";
 
 import { createLogger } from "./logger.js";
 import { FRAME_SIZE } from "./sprites.js";

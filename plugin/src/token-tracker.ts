@@ -1,4 +1,4 @@
-import type { TokenData } from "@opencode-avatar/shared/src/protocol.js";
+import type { TokenData } from "@opencode-avatar/shared";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("token-tracker");

@@ -6,7 +6,7 @@ import type {
   StateMessage,
   SyncMessage,
   TokenData,
-} from "@opencode-avatar/shared/src/protocol.js";
+} from "@opencode-avatar/shared";
 
 import { TokenFlameEffect } from "./flames.js";
 import { createLogger } from "./logger.js";
