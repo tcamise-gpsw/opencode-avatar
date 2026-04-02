@@ -56,14 +56,14 @@ In one terminal, watch the plugin package:
 corepack pnpm dev:plugin
 ```
 
-Register the plugin in your OpenCode config, then start OpenCode so it loads `plugin/src/index.ts` and opens the avatar WebSocket server.
+Register the plugin in your OpenCode config (`~/.config/opencode/config.json`), then start OpenCode so it loads `plugin/src/index.ts` and opens the avatar WebSocket server.
 
 Example config snippet:
 
 ```json
 {
   "plugin": [
-    ["/Users/tcamise/gopro/opencode-avatar/plugin"]
+    "/Users/tcamise/gopro/opencode-avatar/plugin"
   ]
 }
 ```
