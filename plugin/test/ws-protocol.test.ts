@@ -127,4 +127,35 @@ describe("AvatarWSServer", () => {
 
     await expect(connectWithFirstMessage(port)).rejects.toBeDefined();
   });
+
+  it("does not leave a live server behind when stop overlaps startup", async () => {
+    const overlappingServer = new AvatarWSServer(0);
+
+    const startPromise = overlappingServer.start();
+    const stopPromise = overlappingServer.stop();
+
+    await Promise.allSettled([startPromise, stopPromise]);
+
+    expect(overlappingServer.getPort()).toBe(0);
+  });
+
+  it("can start cleanly after a stop interrupts startup", async () => {
+    const restartingServer = new AvatarWSServer(0);
+
+    const firstStart = restartingServer.start();
+    const stopPromise = restartingServer.stop();
+    const secondStart = restartingServer.start();
+
+    await Promise.allSettled([firstStart, stopPromise]);
+    await secondStart;
+
+    const port = restartingServer.getPort();
+    expect(port).toBeGreaterThan(0);
+
+    const { ws, message } = await connectWithFirstMessage(port);
+    expect(message.type).toBe("sync");
+
+    ws.close();
+    await restartingServer.stop();
+  });
 });
