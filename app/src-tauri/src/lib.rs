@@ -21,7 +21,7 @@ pub fn run() {
 
 #[cfg(target_os = "macos")]
 fn configure_overlay_window<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri::Result<()> {
-  use cocoa::appkit::{NSMainMenuWindowLevel, NSWindow, NSWindowCollectionBehavior};
+  use cocoa::appkit::{NSWindow, NSWindowCollectionBehavior};
   use cocoa::base::id;
   use tauri::Manager;
 
@@ -41,7 +41,6 @@ fn configure_overlay_window<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri
       NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
         | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
     );
-    ns_window.setLevel_(NSMainMenuWindowLevel as i64 + 1);
   }
 
   app.set_activation_policy(tauri::ActivationPolicy::Accessory);
