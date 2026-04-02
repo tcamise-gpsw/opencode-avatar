@@ -225,6 +225,10 @@ function getAssistantTokenTotal(event: Extract<SDKEvent, { type: "message.update
     return null;
   }
 
+  if (!("tokens" in info) || !info.tokens) {
+    return null;
+  }
+
   return (
     info.tokens.input +
     info.tokens.output +
@@ -244,9 +248,7 @@ function handleEvent(event: SDKEvent): void {
     }
     case "session.updated": {
       const { created } = getOrCreateSession(event.properties.info.id, event.properties.info.title);
-      if (created) {
-        broadcastSession(event.properties.info.id, "created");
-      }
+      broadcastSession(event.properties.info.id, created ? "created" : "resumed");
       broadcastState(event.properties.info.id);
       return;
     }
