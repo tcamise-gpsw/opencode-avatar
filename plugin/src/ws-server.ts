@@ -10,6 +10,9 @@ const log = createLogger("ws-server");
 
 export class AvatarWSServer {
   private wss: WebSocketServer | null = null;
+  private startingServer: WebSocketServer | null = null;
+  private startPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
   private readonly clients = new Set<WebSocket>();
   private syncData: SessionInfo[] = [];
   private readonly port: number;
@@ -24,8 +27,21 @@ export class AvatarWSServer {
       return;
     }
 
-    await new Promise<void>((resolve, reject) => {
+    if (this.stopPromise) {
+      await this.stopPromise;
+    }
+
+    if (this.wss) {
+      return;
+    }
+
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+
+    this.startPromise = new Promise<void>((resolve, reject) => {
       const wss = new WebSocketServer({ port: this.port });
+      this.startingServer = wss;
       let settled = false;
 
       const resolveOnce = () => {
@@ -34,9 +50,18 @@ export class AvatarWSServer {
         }
 
         settled = true;
+
+        if (this.startingServer !== wss) {
+          this.startPromise = null;
+          resolve();
+          return;
+        }
+
         const address = wss.address();
         this.actualPort = typeof address === "object" && address ? address.port : this.port;
         this.wss = wss;
+        this.startingServer = null;
+        this.startPromise = null;
         log.info("ws_server_started", { port: this.actualPort });
         resolve();
       };
@@ -47,12 +72,30 @@ export class AvatarWSServer {
         }
 
         settled = true;
+        if (this.startingServer === wss) {
+          this.startingServer = null;
+        }
+        this.startPromise = null;
         log.error("ws_server_error", { error: error.message });
         reject(error);
       };
 
+      const settleClosedStart = () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        if (this.startingServer === wss) {
+          this.startingServer = null;
+        }
+        this.startPromise = null;
+        resolve();
+      };
+
       wss.once("listening", resolveOnce);
       wss.once("error", rejectOnce);
+      wss.once("close", settleClosedStart);
       wss.on("connection", (ws) => {
         this.clients.add(ws);
         log.info("ws_client_connected", { clients: this.clients.size });
@@ -74,11 +117,18 @@ export class AvatarWSServer {
         });
       });
     });
+
+    return this.startPromise;
   }
 
   async stop(): Promise<void> {
-    const wss = this.wss;
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+
+    const wss = this.wss ?? this.startingServer;
     this.wss = null;
+    this.startingServer = null;
     this.actualPort = 0;
 
     for (const client of this.clients) {
@@ -87,15 +137,20 @@ export class AvatarWSServer {
     this.clients.clear();
 
     if (!wss) {
+      this.startPromise = null;
       return;
     }
 
-    await new Promise<void>((resolve) => {
+    this.stopPromise = new Promise<void>((resolve) => {
       wss.close(() => {
+        this.startPromise = null;
+        this.stopPromise = null;
         log.info("ws_server_stopped");
         resolve();
       });
     });
+
+    return this.stopPromise;
   }
 
   getPort(): number {
