@@ -75,9 +75,17 @@ export class TokenFlameEffect {
     const emissionRate = lerp(0, 26, this.intensity);
     this.emissionAccumulator += emissionRate * deltaSeconds;
 
+    if (this.particles.length >= MAX_PARTICLES) {
+      this.emissionAccumulator = 0;
+    }
+
     while (this.emissionAccumulator >= 1 && this.particles.length < MAX_PARTICLES) {
       this.emissionAccumulator -= 1;
       this.spawnParticle();
+    }
+
+    if (this.emissionAccumulator >= 1) {
+      this.emissionAccumulator %= 1;
     }
 
     for (let index = this.particles.length - 1; index >= 0; index -= 1) {
