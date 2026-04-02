@@ -57,6 +57,10 @@ export class SessionStateMachine {
     }
 
     const tool = this.getHighestPriorityTool();
+    if (tool && this.shouldUseHeldState(tool.state)) {
+      return this.holdState!;
+    }
+
     if (tool) {
       return tool.state;
     }
@@ -84,6 +88,10 @@ export class SessionStateMachine {
     }
 
     const tool = this.getHighestPriorityTool();
+    if (tool && this.shouldUseHeldState(tool.state)) {
+      return this.holdLabel;
+    }
+
     if (tool) {
       return tool.label;
     }
@@ -101,9 +109,6 @@ export class SessionStateMachine {
 
     this.activeTools.push({ name: toolName, state, label });
     this.isThinking = false;
-    this.holdState = null;
-    this.holdLabel = null;
-    this.holdUntil = 0;
 
     log.debug("tool_start", { sessionId: this.sessionId, toolName, state, label });
   }
@@ -115,7 +120,8 @@ export class SessionStateMachine {
     }
 
     const [removed] = this.activeTools.splice(index, 1);
-    if (this.activeTools.length === 0) {
+    const nextTool = this.getHighestPriorityTool();
+    if (!nextTool || STATE_PRIORITY[removed.state] < STATE_PRIORITY[nextTool.state]) {
       this.holdState = removed.state;
       this.holdLabel = removed.label;
       this.holdUntil = this.now + TOOL_HOLD_MS;
@@ -171,7 +177,7 @@ export class SessionStateMachine {
     let best: ActiveTool | null = null;
 
     for (const tool of this.activeTools) {
-      if (!best || STATE_PRIORITY[tool.state] < STATE_PRIORITY[best.state]) {
+      if (!best || STATE_PRIORITY[tool.state] <= STATE_PRIORITY[best.state]) {
         best = tool;
       }
     }
@@ -190,6 +196,10 @@ export class SessionStateMachine {
       this.holdLabel = null;
       this.holdUntil = 0;
     }
+  }
+
+  private shouldUseHeldState(activeState: AvatarState): boolean {
+    return this.holdState !== null && STATE_PRIORITY[this.holdState] < STATE_PRIORITY[activeState];
   }
 
   private findLastToolIndex(toolName: string): number {
