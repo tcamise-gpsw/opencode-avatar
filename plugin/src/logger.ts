@@ -13,6 +13,7 @@ export const LEVEL_ORDER: Record<LogLevel, number> = {
 
 const LOG_DIR = join(homedir(), ".opencode-avatar", "logs");
 const LOG_FILE = join(LOG_DIR, "plugin.log");
+const RESERVED_FIELDS = new Set(["ts", "level", "component", "msg", "logSerializationError"]);
 
 function getCurrentLevel(): LogLevel {
   const value = process.env.AVATAR_LOG_LEVEL;
@@ -43,10 +44,37 @@ function formatMessage(
     level,
     component,
     msg: message,
-    ...data,
+    ...sanitizeData(data),
   };
 
-  return JSON.stringify(entry);
+  try {
+    return JSON.stringify(entry);
+  } catch (error) {
+    return JSON.stringify({
+      ts: entry.ts,
+      level,
+      component,
+      msg: message,
+      logSerializationError: String(error),
+    });
+  }
+}
+
+function sanitizeData(data?: Record<string, unknown>): Record<string, unknown> {
+  if (!data) {
+    return {};
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (RESERVED_FIELDS.has(key)) {
+      sanitized[`meta_${key}`] = value;
+      continue;
+    }
+    sanitized[key] = value;
+  }
+
+  return sanitized;
 }
 
 function writeLog(formatted: string): void {
