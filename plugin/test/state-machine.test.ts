@@ -76,6 +76,21 @@ describe("SessionStateMachine", () => {
       sm.tick(300);
       expect(sm.getState()).toBe("reading");
     });
+
+    it("keeps the held higher-priority state during rapid lower-priority handoff", () => {
+      sm.onToolStart("Bash", { command: "npm test" });
+      sm.onToolEnd("Bash");
+
+      sm.onToolStart("Edit", { filePath: "file.ts" });
+
+      expect(sm.getState()).toBe("running");
+      expect(sm.getLabel()).toBe("Running npm test");
+
+      sm.tick(600);
+
+      expect(sm.getState()).toBe("editing");
+      expect(sm.getLabel()).toBe("Editing file.ts");
+    });
   });
 
   describe("thinking state", () => {
@@ -133,6 +148,14 @@ describe("SessionStateMachine", () => {
       sm.onToolStart("Edit", { filePath: "f.ts" });
       sm.onToolStart("Bash", { command: "test" });
       expect(sm.getState()).toBe("running");
+    });
+
+    it("uses the most recent equal-priority tool label", () => {
+      sm.onToolStart("Read", { path: "foo.ts" });
+      sm.onToolStart("Read", { path: "bar.ts" });
+
+      expect(sm.getState()).toBe("reading");
+      expect(sm.getLabel()).toBe("Reading bar.ts");
     });
   });
 
