@@ -41,44 +41,80 @@ export type AvatarRendererInitOptions = {
 };
 
 export class AvatarRenderer {
-  private readonly app = new Application();
-  private readonly robotLayer = new Container();
+  private app: Application | null = null;
+  private robotLayer: Container | null = null;
   private readonly robots = new Map<string, ManagedRobot>();
+  private readonly pendingOperations: Array<() => void> = [];
   private textures = new Map<string, Texture>();
   private initialized = false;
+  private initPromise: Promise<void> | null = null;
   private disconnected = false;
+  private animationFrame: number | null = null;
+  private lastFrameTime = 0;
+  private lifecycleVersion = 0;
 
   async init(options: AvatarRendererInitOptions = {}): Promise<void> {
     if (this.initialized) {
       return;
     }
 
-    await this.app.init({
-      antialias: false,
-      backgroundAlpha: 0,
-      canvas: options.canvas,
-      height: MIN_CANVAS_HEIGHT,
-      width: RENDERER_WIDTH,
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+
+    this.initPromise = (async () => {
+      const initVersion = this.lifecycleVersion;
+      const app = new Application();
+      const robotLayer = new Container();
+
+      await app.init({
+        antialias: false,
+        backgroundAlpha: 0,
+        canvas: options.canvas,
+        height: MIN_CANVAS_HEIGHT,
+        width: RENDERER_WIDTH,
+      });
+
+      if (initVersion !== this.lifecycleVersion) {
+        app.destroy(true, { children: true, texture: true });
+        return;
+      }
+
+      this.app = app;
+      this.robotLayer = robotLayer;
+      this.textures = generateSpriteTextures(app);
+      this.robotLayer.eventMode = "none";
+      this.app.stage.eventMode = "none";
+      this.app.stage.addChild(this.robotLayer);
+
+      this.initialized = true;
+      this.startAnimationLoop();
+      this.flushPendingOperations();
+
+      log.info("renderer_initialized", {
+        height: MIN_CANVAS_HEIGHT,
+        width: RENDERER_WIDTH,
+      });
+    })().finally(() => {
+      this.initPromise = null;
     });
 
-    this.textures = generateSpriteTextures(this.app);
-    this.robotLayer.eventMode = "none";
-    this.app.stage.eventMode = "none";
-    this.app.stage.addChild(this.robotLayer);
-
-    this.initialized = true;
-
-    log.info("renderer_initialized", {
-      height: MIN_CANVAS_HEIGHT,
-      width: RENDERER_WIDTH,
-    });
+    return this.initPromise;
   }
 
   get canvas(): HTMLCanvasElement {
+    if (!this.app) {
+      throw new Error("Renderer not initialized");
+    }
+
     return this.app.canvas;
   }
 
   updateSync(message: SyncMessage): void {
+    if (!this.runOrQueue(() => this.updateSync(message))) {
+      return;
+    }
+
     const nextSessionIds = new Set(message.sessions.map((session) => session.sessionId));
 
     for (const sessionId of this.robots.keys()) {
@@ -97,6 +133,10 @@ export class AvatarRenderer {
   }
 
   applyState(message: StateMessage): void {
+    if (!this.runOrQueue(() => this.applyState(message))) {
+      return;
+    }
+
     const managed = this.ensureRobot(message.sessionId, {
       label: message.label,
       tokens: message.tokens,
@@ -118,6 +158,10 @@ export class AvatarRenderer {
   }
 
   applySession(message: SessionMessage): void {
+    if (!this.runOrQueue(() => this.applySession(message))) {
+      return;
+    }
+
     if (message.action === "ended") {
       this.removeRobot(message.sessionId, "session_ended");
       return;
@@ -154,7 +198,7 @@ export class AvatarRenderer {
   }
 
   tick(deltaMs: number): void {
-    if (!Number.isFinite(deltaMs) || deltaMs <= 0) {
+    if (!this.app || !Number.isFinite(deltaMs) || deltaMs <= 0) {
       return;
     }
 
@@ -167,6 +211,13 @@ export class AvatarRenderer {
   }
 
   destroy(): void {
+    this.lifecycleVersion += 1;
+
+    if (this.animationFrame !== null) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+
     for (const managed of this.robots.values()) {
       managed.flames.destroy();
       managed.robot.destroy();
@@ -175,7 +226,14 @@ export class AvatarRenderer {
 
     this.robots.clear();
     this.textures.clear();
-    this.app.destroy(true, { children: true, texture: true });
+    this.app?.destroy(true, { children: true, texture: true });
+    this.app = null;
+    this.robotLayer = null;
+    this.pendingOperations.length = 0;
+    this.initialized = false;
+    this.initPromise = null;
+    this.disconnected = false;
+    this.lastFrameTime = 0;
 
     log.info("renderer_destroyed");
   }
@@ -221,7 +279,7 @@ export class AvatarRenderer {
     robot.setDisconnected(this.disconnected);
 
     wrapper.addChild(flames.container, robot.container);
-    this.robotLayer.addChild(wrapper);
+    this.robotLayer?.addChild(wrapper);
 
     const managed: ManagedRobot = {
       createdAt: Date.now(),
@@ -254,7 +312,7 @@ export class AvatarRenderer {
     }
 
     this.robots.delete(sessionId);
-    this.robotLayer.removeChild(managed.wrapper);
+    this.robotLayer?.removeChild(managed.wrapper);
     managed.flames.destroy();
     managed.robot.destroy();
     managed.wrapper.destroy({ children: true });
@@ -268,6 +326,10 @@ export class AvatarRenderer {
   }
 
   private relayout(): void {
+    if (!this.app) {
+      return;
+    }
+
     const ordered = Array.from(this.robots.values()).sort((left, right) => left.createdAt - right.createdAt);
     const contentHeight = ordered.length > 0
       ? ordered.length * LAYOUT.robotSize + (ordered.length - 1) * LAYOUT.robotGap
@@ -286,5 +348,42 @@ export class AvatarRenderer {
       canvasHeight,
       count: ordered.length,
     });
+  }
+
+  private runOrQueue(operation: () => void): boolean {
+    if (this.initialized) {
+      return true;
+    }
+
+    this.pendingOperations.push(operation);
+    return false;
+  }
+
+  private flushPendingOperations(): void {
+    while (this.pendingOperations.length > 0) {
+      const operation = this.pendingOperations.shift();
+      operation?.();
+    }
+  }
+
+  private startAnimationLoop(): void {
+    if (this.animationFrame !== null) {
+      return;
+    }
+
+    const step = (time: number) => {
+      if (!this.initialized) {
+        this.animationFrame = null;
+        return;
+      }
+
+      const deltaMs = this.lastFrameTime === 0 ? 16.67 : Math.max(0, time - this.lastFrameTime);
+      this.lastFrameTime = time;
+      this.tick(deltaMs);
+      this.animationFrame = requestAnimationFrame(step);
+    };
+
+    this.lastFrameTime = 0;
+    this.animationFrame = requestAnimationFrame(step);
   }
 }
