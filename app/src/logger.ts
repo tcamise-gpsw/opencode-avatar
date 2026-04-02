@@ -3,6 +3,8 @@ type ImportMetaEnvLike = {
   readonly VITE_LOG_LEVEL?: string;
 };
 
+const RESERVED_FIELDS = new Set(["ts", "level", "component", "msg", "logSerializationError"]);
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export const LEVEL_ORDER: Record<LogLevel, number> = {
@@ -16,13 +18,34 @@ const env = (import.meta as ImportMeta & { env?: ImportMetaEnvLike }).env;
 const requestedLevel = env?.VITE_LOG_LEVEL?.toLowerCase();
 
 const currentLevel: LogLevel =
-  requestedLevel && requestedLevel in LEVEL_ORDER
-    ? (requestedLevel as LogLevel)
+  requestedLevel === "debug" ||
+  requestedLevel === "info" ||
+  requestedLevel === "warn" ||
+  requestedLevel === "error"
+    ? requestedLevel
     : "info";
 
 const debugEnabled = env?.VITE_DEBUG === "1";
 
 type LogExtra = Record<string, unknown>;
+
+function sanitizeExtra(extra?: LogExtra): LogExtra {
+  if (!extra) {
+    return {};
+  }
+
+  const sanitized: LogExtra = {};
+  for (const [key, value] of Object.entries(extra)) {
+    if (RESERVED_FIELDS.has(key)) {
+      sanitized[`meta_${key}`] = value;
+      continue;
+    }
+
+    sanitized[key] = value;
+  }
+
+  return sanitized;
+}
 
 function shouldLog(level: LogLevel): boolean {
   return LEVEL_ORDER[level] >= LEVEL_ORDER[currentLevel];
@@ -43,10 +66,21 @@ function writeLog(
     level,
     component,
     msg,
-    ...(extra ?? {}),
+    ...sanitizeExtra(extra),
   };
 
-  const payload = JSON.stringify(entry);
+  let payload: string;
+  try {
+    payload = JSON.stringify(entry);
+  } catch (error) {
+    payload = JSON.stringify({
+      ts: entry.ts,
+      level,
+      component,
+      msg,
+      logSerializationError: String(error),
+    });
+  }
 
   if (level === "error") {
     console.error(payload);
