@@ -1,0 +1,129 @@
+# OpenCode Avatar Overlay
+
+`opencode-avatar` is a pnpm workspace that turns OpenCode activity into a desktop overlay.
+
+The current implementation has three parts:
+
+1. `plugin/`: an OpenCode plugin that tracks session state, token throughput, and tool activity, then publishes updates over WebSocket.
+2. `shared/`: the shared TypeScript protocol and state definitions used by both sides of the connection.
+3. `app/`: a Tauri 2 desktop shell that hosts a PixiJS renderer and connects to the plugin's WebSocket server.
+
+## Workspace Layout
+
+```text
+.
+├── app/      # Tauri 2 + Vite + PixiJS overlay app
+├── plugin/   # OpenCode plugin, state machine, token tracker, WS server
+├── shared/   # Shared protocol types and state mappings
+└── docs/     # Project documentation
+```
+
+## Architecture
+
+Runtime flow:
+
+```text
+OpenCode plugin -> WebSocket -> Tauri 2 + PixiJS app
+```
+
+- `shared/src/protocol.ts` defines avatar states plus the `session`, `state`, and `sync` WebSocket message shapes.
+- `plugin/src/index.ts` listens to OpenCode hooks, feeds `SessionStateMachine` and `TokenTracker`, and broadcasts updates through `AvatarWSServer`.
+- `app/src/ws-client.ts` reconnects to the plugin WebSocket and forwards messages into `AvatarRenderer`.
+- `app/src/renderer.ts` manages one robot per active session and uses `sprites.ts`, `robot.ts`, and `flames.ts` to render the overlay.
+
+More detail lives in `docs/architecture.md`.
+
+## Prerequisites
+
+- Node.js with Corepack enabled
+- `pnpm` via Corepack
+- Rust toolchain for Tauri builds
+- Platform dependencies required by Tauri 2
+
+## Install
+
+```bash
+corepack pnpm install
+```
+
+## Run
+
+Run the plugin watcher in one terminal:
+
+```bash
+corepack pnpm dev:plugin
+```
+
+Run the desktop overlay in another terminal:
+
+```bash
+corepack pnpm --dir app tauri:dev
+```
+
+If you only want the Vite frontend without the Tauri shell:
+
+```bash
+corepack pnpm dev:app
+```
+
+Defaults expect the plugin WebSocket server on `ws://127.0.0.1:2728`.
+
+## Build
+
+Build all workspace packages:
+
+```bash
+corepack pnpm build
+```
+
+Build the packaged Tauri app:
+
+```bash
+corepack pnpm --dir app tauri:build
+```
+
+## Test
+
+Run the workspace test suite:
+
+```bash
+corepack pnpm test
+```
+
+The current automated tests live in `plugin/test/` and cover the state machine, token tracking, and WebSocket protocol.
+
+## Environment Variables
+
+### Plugin
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AVATAR_WS_PORT` | `2728` | Port used by the plugin WebSocket server. |
+| `AVATAR_LOG_LEVEL` | `info` | Plugin log verbosity: `debug`, `info`, `warn`, or `error`. |
+
+### App
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VITE_AVATAR_WS_URL` | `ws://127.0.0.1:2728` | WebSocket URL used by the PixiJS client. |
+| `VITE_LOG_LEVEL` | `info` | Frontend console log verbosity: `debug`, `info`, `warn`, or `error`. |
+| `VITE_DEBUG` | unset | Enables frontend debug mode when set to `1`. |
+
+Example:
+
+```bash
+AVATAR_WS_PORT=3001 AVATAR_LOG_LEVEL=debug corepack pnpm dev:plugin
+VITE_AVATAR_WS_URL=ws://127.0.0.1:3001 VITE_LOG_LEVEL=debug VITE_DEBUG=1 corepack pnpm --dir app tauri:dev
+```
+
+## Logging
+
+- The plugin writes newline-delimited JSON logs to `~/.opencode-avatar/logs/plugin.log`.
+- The frontend TypeScript logger currently writes structured logs to the browser console and respects `VITE_LOG_LEVEL` and `VITE_DEBUG`.
+- The Tauri Rust shell enables `tauri-plugin-log` in debug builds, but this repo does not currently configure the frontend app to persist its own logs into `~/.opencode-avatar/logs/`.
+
+## Current Notes
+
+- This documentation describes the repository as it exists now, not the original design plan.
+- The plugin and app are intentionally decoupled through the shared protocol and local WebSocket boundary.
+- The app is currently centered on rendering session robots, token-driven flame effects, and connection state, rather than a broader control surface.
