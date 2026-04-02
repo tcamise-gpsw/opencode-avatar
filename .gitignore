@@ -25,6 +25,7 @@ Thumbs.db
 
 # Brainstorming sessions (local visual companion artifacts)
 .superpowers/
+.opencode/
 
 # Environment
 .env

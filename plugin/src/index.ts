@@ -369,7 +369,10 @@ export const server: Plugin = async () => {
   };
 };
 
+export const id = "opencode-avatar";
+
 const plugin: PluginModule = {
+  id,
   server,
 };
 

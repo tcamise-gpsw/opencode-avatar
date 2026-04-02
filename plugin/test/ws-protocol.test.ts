@@ -6,6 +6,15 @@ import type {
   SyncMessage,
 } from "@opencode-avatar/shared";
 import { AvatarWSServer } from "../src/ws-server.js";
+import pluginModule, { server as pluginServer } from "../src/index.js";
+
+describe("plugin module packaging", () => {
+  it("exports an id and server entrypoint for OpenCode plugin loading", () => {
+    expect(pluginServer).toBeTypeOf("function");
+    expect(pluginModule.id).toBe("opencode-avatar");
+    expect(pluginModule.server).toBe(pluginServer);
+  });
+});
 
 describe("AvatarWSServer", () => {
   let server: AvatarWSServer;
