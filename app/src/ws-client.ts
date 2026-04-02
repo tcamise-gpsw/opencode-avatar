@@ -3,7 +3,7 @@ import type {
   SessionMessage,
   StateMessage,
   SyncMessage,
-} from "@opencode-avatar/shared/src/protocol.js";
+} from "@opencode-avatar/shared";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("ws-client");

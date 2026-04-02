@@ -2,7 +2,7 @@ import type { Hooks, Plugin, PluginModule } from "@opencode-ai/plugin";
 import type {
   SessionMessage,
   StateMessage,
-} from "@opencode-avatar/shared/src/protocol.js";
+} from "@opencode-avatar/shared";
 import { createLogger } from "./logger.js";
 import { SessionStateMachine } from "./state-machine.js";
 import { TokenTracker } from "./token-tracker.js";

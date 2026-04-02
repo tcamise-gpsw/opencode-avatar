@@ -4,7 +4,7 @@ import type {
   PluginMessage,
   StateMessage,
   SyncMessage,
-} from "@opencode-avatar/shared/src/protocol.js";
+} from "@opencode-avatar/shared";
 import { AvatarWSServer } from "../src/ws-server.js";
 
 describe("AvatarWSServer", () => {

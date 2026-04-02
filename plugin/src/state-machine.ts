@@ -5,7 +5,7 @@ import {
   DEFAULT_TOOL_STATE,
   STATE_PRIORITY,
   TOOL_STATE_MAP,
-} from "@opencode-avatar/shared/src/protocol.js";
+} from "@opencode-avatar/shared";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("state-machine");

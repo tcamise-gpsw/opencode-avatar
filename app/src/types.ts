@@ -1,4 +1,4 @@
-import type { AvatarState } from "@opencode-avatar/shared/src/protocol.js";
+import type { AvatarState } from "@opencode-avatar/shared";
 
 /** Sprite animation config per state */
 export interface StateAnimationConfig {
