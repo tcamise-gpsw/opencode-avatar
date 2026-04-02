@@ -77,7 +77,14 @@ async function bootstrap(): Promise<void> {
   };
 
   window.addEventListener("beforeunload", cleanup, { once: true });
-  window.addEventListener("pagehide", cleanup, { once: true });
+  window.addEventListener(
+    "pagehide",
+    (event) => {
+      if (!event.persisted) {
+        cleanup();
+      }
+    },
+  );
 
   wsClient.connect();
 
