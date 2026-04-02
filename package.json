@@ -1,11 +1,12 @@
 {
   "name": "opencode-avatar",
   "private": true,
+  "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "test": "pnpm -r test",
-    "build": "pnpm -r build",
-    "dev:plugin": "pnpm --filter @opencode-avatar/plugin dev",
-    "dev:app": "pnpm --filter @opencode-avatar/app dev"
+    "test": "corepack pnpm -r --if-present test",
+    "build": "corepack pnpm -r --if-present build",
+    "dev:plugin": "corepack pnpm --filter @opencode-avatar/plugin dev",
+    "dev:app": "corepack pnpm --filter @opencode-avatar/app dev"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

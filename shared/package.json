@@ -6,6 +6,7 @@
   "main": "src/protocol.ts",
   "types": "src/protocol.ts",
   "scripts": {
+    "build": "tsc",
     "typecheck": "tsc --noEmit"
   }
 }
