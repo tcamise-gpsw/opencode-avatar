@@ -32,10 +32,10 @@ export class TokenTracker {
     return Math.round(sum / (WINDOW_MS / 1000));
   }
 
-  getData(): TokenData {
+  getData(now: number = this.lastTimestamp): TokenData {
     return {
       total: this.total,
-      rate: this.getRateAt(this.lastTimestamp),
+      rate: this.getRateAt(now),
     };
   }
 
