@@ -133,11 +133,13 @@ Install dependencies:
 corepack pnpm install
 ```
 
-Run the plugin watcher:
+Watch the plugin package while developing:
 
 ```bash
 corepack pnpm dev:plugin
 ```
+
+Note: this only runs `tsc --noEmit --watch`. The plugin itself runs inside OpenCode after you register the local `plugin/` package in OpenCode config and launch OpenCode.
 
 Run the Tauri overlay app:
 
