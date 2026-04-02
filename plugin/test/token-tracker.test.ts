@@ -54,6 +54,12 @@ describe("TokenTracker", () => {
 
       expect(tracker.getData()).toEqual({ total: 200, rate: 40 });
     });
+
+    it("drops the reported rate as samples age out of the window", () => {
+      tracker.add(500, 0);
+
+      expect(tracker.getData(6000)).toEqual({ total: 500, rate: 0 });
+    });
   });
 
   describe("reset", () => {
