@@ -64,23 +64,38 @@ export class AvatarWSClient {
       return;
     }
 
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
     log.info("ws_connecting", { url: this.url });
 
+    let socket: WebSocket;
+
     try {
-      this.ws = new WebSocket(this.url);
+      socket = new WebSocket(this.url);
+      this.ws = socket;
     } catch (error) {
       log.error("ws_connect_error", { error: String(error) });
       this.scheduleReconnect();
       return;
     }
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (this.ws !== socket) {
+        return;
+      }
+
       log.info("ws_connected");
       this.reconnectDelay = 1000;
       this.callbacks.onConnected();
     };
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.ws !== socket) {
+        return;
+      }
+
       const message = this.parseMessage(event.data);
       if (!message) {
         return;
@@ -103,7 +118,11 @@ export class AvatarWSClient {
       }
     };
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (this.ws !== socket) {
+        return;
+      }
+
       log.info("ws_disconnected");
       this.ws = null;
       this.callbacks.onDisconnected();
@@ -113,7 +132,11 @@ export class AvatarWSClient {
       }
     };
 
-    this.ws.onerror = (error) => {
+    socket.onerror = (error) => {
+      if (this.ws !== socket) {
+        return;
+      }
+
       log.error("ws_error", { error: String(error) });
     };
   }
