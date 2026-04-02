@@ -48,13 +48,27 @@ corepack pnpm install
 
 ## Run
 
-Run the plugin watcher in one terminal:
+The plugin does **not** run as a standalone server process. It is loaded by OpenCode, and `dev:plugin` only keeps the TypeScript package typechecked while you work.
+
+In one terminal, watch the plugin package:
 
 ```bash
 corepack pnpm dev:plugin
 ```
 
-Run the desktop overlay in another terminal:
+Register the plugin in your OpenCode config, then start OpenCode so it loads `plugin/src/index.ts` and opens the avatar WebSocket server.
+
+Example config snippet:
+
+```json
+{
+  "plugin": [
+    ["/Users/tcamise/gopro/opencode-avatar/plugin"]
+  ]
+}
+```
+
+Once OpenCode is running with the plugin enabled, run the desktop overlay in another terminal:
 
 ```bash
 corepack pnpm --dir app tauri:dev
@@ -67,6 +81,11 @@ corepack pnpm dev:app
 ```
 
 Defaults expect the plugin WebSocket server on `ws://127.0.0.1:2728`.
+
+Expected success signals:
+
+- OpenCode loads the plugin and `~/.opencode-avatar/logs/plugin.log` contains `plugin_ready`
+- The overlay stops reconnecting and begins rendering robots for active sessions
 
 ## Build
 
@@ -112,9 +131,14 @@ The current automated tests live in `plugin/test/` and cover the state machine, 
 Example:
 
 ```bash
-AVATAR_WS_PORT=3001 AVATAR_LOG_LEVEL=debug corepack pnpm dev:plugin
+export AVATAR_WS_PORT=3001
+export AVATAR_LOG_LEVEL=debug
+
+# Launch OpenCode in the same environment so the plugin inherits these values.
 VITE_AVATAR_WS_URL=ws://127.0.0.1:3001 VITE_LOG_LEVEL=debug VITE_DEBUG=1 corepack pnpm --dir app tauri:dev
 ```
+
+To change the plugin WebSocket port, export `AVATAR_WS_PORT` in the environment used to launch OpenCode.
 
 ## Logging
 
