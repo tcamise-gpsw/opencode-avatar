@@ -6,6 +6,7 @@ import type {
   StateMessage,
 } from "@opencode-avatar/shared";
 import { randomUUID } from "crypto";
+import { LeadershipRetryController, isAddressInUseError } from "./leadership-retry.js";
 import { createLogger } from "./logger.js";
 import { handleCommand } from "./command-handler.js";
 import { SessionRegistry, type SessionMemberRuntime } from "./session-registry.js";
@@ -26,6 +27,7 @@ type ToolAfterInput = Parameters<NonNullable<Hooks["tool.execute.after"]>>[0];
 const DEFAULT_WS_PORT = 2728;
 const TICK_INTERVAL_MS = 250;
 const CROSS_PROCESS_TIMEOUT_MS = 10_000;
+const LEADER_RETRY_INTERVAL_MS = 1_000;
 
 const log = createLogger("plugin");
 const port = getPortFromEnv(process.env.AVATAR_WS_PORT);
@@ -38,6 +40,7 @@ let serverStartPromise: Promise<void> | null = null;
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let sharedSyncCache: SessionInfo[] = [];
 let sdkClient: PluginInput["client"] | null = null;
+let runtimeActive = false;
 const pendingCrossProcessCommands = new Map<
   string,
   {
@@ -47,6 +50,13 @@ const pendingCrossProcessCommands = new Map<
     reply: (result: CommandResult) => void;
   }
 >();
+const leaderRetry = new LeadershipRetryController(LEADER_RETRY_INTERVAL_MS, () => {
+  if (!runtimeActive) {
+    return;
+  }
+
+  ensureServerStarted();
+});
 
 function isLeaderInstance(): boolean {
   return wsServer.getPort() > 0;
@@ -248,19 +258,55 @@ function getPortFromEnv(value: string | undefined): number {
 }
 
 function ensureServerStarted(): void {
+  if (!runtimeActive) {
+    return;
+  }
+
   wsServer.setMessageHandler((message, reply) => {
     routeIncomingCommand(message, reply);
   });
 
-  if (!serverStartPromise) {
-    log.info("plugin_initializing", { port });
-    serverStartPromise = wsServer.start().then(() => {
-      log.info("plugin_ready", { port: wsServer.getPort() });
-      refreshSyncData();
-    }).catch((error: unknown) => {
-      serverStartPromise = null;
-      log.error("ws_start_failed", { error: getUnknownErrorMessage(error) });
-    });
+  if (!serverStartPromise && wsServer.getPort() === 0) {
+    if (!leaderRetry.isWaitingForLeadership()) {
+      log.info("plugin_initializing", { port });
+    }
+
+    serverStartPromise = wsServer.start()
+      .then(() => {
+        if (!runtimeActive) {
+          return;
+        }
+
+        const recoveredLeadership = leaderRetry.acquireLeadership();
+        if (recoveredLeadership) {
+          log.info("ws_leadership_acquired", { port: wsServer.getPort() });
+        }
+
+        log.info("plugin_ready", { port: wsServer.getPort() });
+        refreshSyncData();
+      })
+      .catch((error: unknown) => {
+        if (!runtimeActive) {
+          return;
+        }
+
+        if (isAddressInUseError(error)) {
+          const firstWait = leaderRetry.waitForLeadership();
+          if (firstWait) {
+            log.info("ws_leadership_waiting", {
+              port,
+              retryMs: LEADER_RETRY_INTERVAL_MS,
+            });
+          }
+          return;
+        }
+
+        leaderRetry.dispose();
+        log.error("ws_start_failed", { error: getUnknownErrorMessage(error) });
+      })
+      .finally(() => {
+        serverStartPromise = null;
+      });
   }
 
   if (!tickTimer) {
@@ -674,6 +720,7 @@ function handleToolAfter(input: ToolAfterInput): void {
 }
 
 export const server: Plugin = async (input) => {
+  runtimeActive = true;
   sdkClient = input.client;
   log.info("sdk_client_captured", { captured: sdkClient !== null });
   ensureServerStarted();
@@ -695,9 +742,23 @@ export const server: Plugin = async (input) => {
       handleToolAfter(input);
     },
     unload: async () => {
+      runtimeActive = false;
       pendingCrossProcessCommands.clear();
+
+      if (tickTimer) {
+        clearInterval(tickTimer);
+        tickTimer = null;
+      }
+
+      leaderRetry.dispose();
+      registry.clear();
       sharedSessionStore.remove();
       updateSyncData([], Date.now(), false);
+      serverStartPromise = null;
+      sdkClient = null;
+      await wsServer.stop();
+      sharedSyncCache = [];
+      wsServer.setSyncData([]);
     },
   };
 };
