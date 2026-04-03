@@ -39,10 +39,19 @@ async function bootstrap(): Promise<void> {
   await renderer.init({ canvas: resolveMount(root) });
 
   renderer.canvas.style.display = "block";
+  renderer.canvas.style.width = "100vw";
+  renderer.canvas.style.height = "100vh";
 
   if (renderer.canvas.parentElement !== root) {
     root.replaceChildren(renderer.canvas);
   }
+
+  const handleResize = () => {
+    renderer.resizeViewport(window.innerWidth, window.innerHeight);
+  };
+
+  handleResize();
+  window.addEventListener("resize", handleResize);
 
   renderer.setDisconnected(true);
 
@@ -71,6 +80,7 @@ async function bootstrap(): Promise<void> {
     }
 
     cleanedUp = true;
+    window.removeEventListener("resize", handleResize);
     wsClient.disconnect();
     renderer.destroy();
     log.info("app_cleaned_up");

@@ -110,6 +110,18 @@ export class AvatarRenderer {
     return this.app.canvas;
   }
 
+  resizeViewport(width: number, height: number): void {
+    if (!this.app) {
+      return;
+    }
+
+    const nextWidth = Math.max(RENDERER_WIDTH, Math.floor(width));
+    const nextHeight = Math.max(MIN_CANVAS_HEIGHT, Math.floor(height));
+
+    this.app.renderer.resize(nextWidth, nextHeight);
+    this.relayout();
+  }
+
   updateSync(message: SyncMessage): void {
     if (!this.runOrQueue(() => this.updateSync(message))) {
       return;
@@ -334,18 +346,25 @@ export class AvatarRenderer {
     const contentHeight = ordered.length > 0
       ? ordered.length * LAYOUT.robotSize + (ordered.length - 1) * LAYOUT.robotGap
       : 0;
-    const canvasHeight = Math.max(MIN_CANVAS_HEIGHT, contentHeight + LAYOUT.edgeMargin * 2);
-    const baseY = canvasHeight - LAYOUT.edgeMargin - LAYOUT.robotSize;
+    const viewportWidth = Math.max(RENDERER_WIDTH, window.innerWidth);
+    const viewportHeight = Math.max(
+      MIN_CANVAS_HEIGHT,
+      window.innerHeight,
+      contentHeight + LAYOUT.edgeMargin * 2,
+    );
+    const baseX = viewportWidth - LAYOUT.edgeMargin - LAYOUT.robotSize;
+    const baseY = viewportHeight - LAYOUT.edgeMargin - LAYOUT.robotSize;
 
     ordered.forEach((managed, index) => {
-      managed.wrapper.x = LAYOUT.edgeMargin;
+      managed.wrapper.x = baseX;
       managed.wrapper.y = baseY - index * (LAYOUT.robotSize + LAYOUT.robotGap);
     });
 
-    this.app.renderer.resize(RENDERER_WIDTH, canvasHeight);
+    this.app.renderer.resize(viewportWidth, viewportHeight);
 
     log.debug("renderer_relayout", {
-      canvasHeight,
+      viewportHeight,
+      viewportWidth,
       count: ordered.length,
     });
   }

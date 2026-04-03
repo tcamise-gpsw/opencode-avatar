@@ -32,6 +32,14 @@ fn configure_overlay_window<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri
   window.set_always_on_top(true)?;
   window.set_visible_on_all_workspaces(true)?;
 
+  if let Some(monitor) = window.current_monitor()? {
+    let monitor_size = monitor.size();
+    let window_size = window.outer_size()?;
+    let x = monitor_size.width as i32 - window_size.width as i32;
+    let y = monitor_size.height as i32 - window_size.height as i32;
+    window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)))?;
+  }
+
   let ns_window = window
     .ns_window()
     .expect("failed to get native macOS window") as id;
