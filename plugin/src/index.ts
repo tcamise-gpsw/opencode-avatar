@@ -512,6 +512,9 @@ function handleEvent(event: SDKEvent): void {
     case "session.idle": {
       const { member, groupId } = getOrCreateSession(event.properties.sessionID);
       member.sm.onMessageComplete();
+      if (member.pendingPermission === null && member.sm.getDiagnostics().activeToolCount > 0) {
+        member.sm.clearExecutionState();
+      }
       logSessionStateSummary("session.idle", groupId, member);
       broadcastState(groupId);
       return;
@@ -524,6 +527,8 @@ function handleEvent(event: SDKEvent): void {
       }
 
       const { member, groupId } = getOrCreateSession(sessionId);
+      member.sm.clearExecutionState({ clearWaiting: true });
+      member.pendingPermission = null;
       member.sm.onError(getSessionErrorMessage(event));
       logSessionStateSummary("session.error", groupId, member);
       broadcastState(groupId);

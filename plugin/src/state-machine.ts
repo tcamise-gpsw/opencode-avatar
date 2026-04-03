@@ -148,6 +148,18 @@ export class SessionStateMachine {
     this.isThinking = false;
   }
 
+  clearExecutionState(options: { clearWaiting?: boolean } = {}): void {
+    this.activeTools = [];
+    this.isThinking = false;
+    this.holdState = null;
+    this.holdLabel = null;
+    this.holdUntil = 0;
+
+    if (options.clearWaiting) {
+      this.waitingLabel = null;
+    }
+  }
+
   onPermissionAsked(label: string): void {
     this.waitingLabel = label;
   }
