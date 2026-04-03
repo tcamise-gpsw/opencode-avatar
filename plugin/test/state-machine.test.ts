@@ -169,6 +169,8 @@ describe("SessionStateMachine", () => {
         state: "reading",
         label: "Reading file.ts",
         tokens: { total: 0, rate: 0 },
+        lastResponse: null,
+        pendingPermission: null,
       });
     });
   });

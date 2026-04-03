@@ -1,11 +1,13 @@
-import type { Hooks, Plugin, PluginModule } from "@opencode-ai/plugin";
+import type { Hooks, Plugin, PluginInput, PluginModule } from "@opencode-ai/plugin";
 import type {
+  CommandResult,
   SessionMessage,
   SessionInfo,
   StateMessage,
 } from "@opencode-avatar/shared";
 import { randomUUID } from "crypto";
 import { createLogger } from "./logger.js";
+import { handleCommand } from "./command-handler.js";
 import { SessionRegistry } from "./session-registry.js";
 import { SharedSessionStore } from "./shared-session-store.js";
 import { SessionStateMachine } from "./state-machine.js";
@@ -23,6 +25,7 @@ type ToolAfterInput = Parameters<NonNullable<Hooks["tool.execute.after"]>>[0];
 
 const DEFAULT_WS_PORT = 2728;
 const TICK_INTERVAL_MS = 250;
+const CROSS_PROCESS_TIMEOUT_MS = 10_000;
 
 const log = createLogger("plugin");
 const port = getPortFromEnv(process.env.AVATAR_WS_PORT);
@@ -34,6 +37,165 @@ const sharedSessionStore = new SharedSessionStore(instanceId);
 let serverStartPromise: Promise<void> | null = null;
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let sharedSyncCache: SessionInfo[] = [];
+let sdkClient: PluginInput["client"] | null = null;
+const pendingCrossProcessCommands = new Map<
+  string,
+  {
+    createdAt: number;
+    sessionId: string;
+    command: string;
+    reply: (result: CommandResult) => void;
+  }
+>();
+
+function isLeaderInstance(): boolean {
+  return wsServer.getPort() > 0;
+}
+
+function makeCommandFailureResult(requestId: string, error: string): CommandResult {
+  return {
+    type: "command.result",
+    requestId,
+    success: false,
+    error,
+  };
+}
+
+function routeIncomingCommand(
+  message: Parameters<Parameters<typeof wsServer.setMessageHandler>[0]>[0],
+  reply: (result: CommandResult) => void,
+): void {
+  const now = Date.now();
+  const isLocalSession = registry.getGroupIdForSession(message.sessionId) !== null;
+
+  log.info("command_routed", {
+    command: message.command,
+    requestId: message.requestId,
+    sessionId: message.sessionId,
+    route: isLocalSession ? "local" : "cross-process",
+  });
+
+  if (isLocalSession) {
+    void handleCommand(message, sdkClient).then((result) => {
+      reply(result);
+    });
+    return;
+  }
+
+  const existsInMergedSync = sharedSyncCache.some((session) => session.sessionId === message.sessionId);
+  if (!existsInMergedSync) {
+    const result = makeCommandFailureResult(message.requestId, "session not found");
+    log.warn("command_route_session_not_found", {
+      command: message.command,
+      requestId: message.requestId,
+      sessionId: message.sessionId,
+    });
+    reply(result);
+    return;
+  }
+
+  const written = sharedSessionStore.writeCommand(message, now);
+  if (!written) {
+    const result = makeCommandFailureResult(message.requestId, "failed to route command");
+    log.error("command_route_write_failed", {
+      command: message.command,
+      requestId: message.requestId,
+      sessionId: message.sessionId,
+    });
+    reply(result);
+    return;
+  }
+
+  pendingCrossProcessCommands.set(message.requestId, {
+    createdAt: now,
+    sessionId: message.sessionId,
+    command: message.command,
+    reply,
+  });
+
+  log.info("command_routed_to_shared_store", {
+    command: message.command,
+    requestId: message.requestId,
+    sessionId: message.sessionId,
+  });
+}
+
+function pollCrossProcessCommands(now = Date.now()): void {
+  if (isLeaderInstance()) {
+    return;
+  }
+
+  const localSessionIds = new Set(registry.getSnapshots(now).map((snapshot) => snapshot.sessionId));
+  const commands = sharedSessionStore.pollCommands(localSessionIds, now);
+  for (const commandFile of commands) {
+    const message = commandFile.message;
+    log.info("command_polled_for_execution", {
+      command: message.command,
+      requestId: message.requestId,
+      sessionId: message.sessionId,
+    });
+
+    void handleCommand(message, sdkClient).then((result) => {
+      const written = sharedSessionStore.writeResult(result, Date.now());
+      if (!written) {
+        log.error("command_result_write_failed", {
+          requestId: result.requestId,
+          success: result.success,
+        });
+        return;
+      }
+
+      log.info("command_result_written", {
+        requestId: result.requestId,
+        success: result.success,
+      });
+    });
+  }
+}
+
+function pollCrossProcessResults(now = Date.now()): void {
+  if (!isLeaderInstance()) {
+    return;
+  }
+
+  // Leader also polls command files with an empty session set to clean stale commands.
+  sharedSessionStore.pollCommands(new Set(), now);
+
+  const results = sharedSessionStore.pollResults();
+  for (const resultFile of results) {
+    const pending = pendingCrossProcessCommands.get(resultFile.result.requestId);
+    if (!pending) {
+      wsServer.broadcast(resultFile.result);
+      log.warn("command_result_without_pending_request", {
+        requestId: resultFile.result.requestId,
+      });
+      continue;
+    }
+
+    pendingCrossProcessCommands.delete(resultFile.result.requestId);
+    pending.reply(resultFile.result);
+    log.info("command_result_returned", {
+      requestId: resultFile.result.requestId,
+      success: resultFile.result.success,
+      route: "cross-process",
+    });
+  }
+
+  for (const [requestId, pending] of pendingCrossProcessCommands.entries()) {
+    if (now - pending.createdAt <= CROSS_PROCESS_TIMEOUT_MS) {
+      continue;
+    }
+
+    pendingCrossProcessCommands.delete(requestId);
+    pending.reply(makeCommandFailureResult(requestId, "command timed out"));
+    log.warn("command_result_timeout", {
+      command: pending.command,
+      requestId,
+      sessionId: pending.sessionId,
+      timeoutMs: CROSS_PROCESS_TIMEOUT_MS,
+    });
+  }
+}
 
 function getPortFromEnv(value: string | undefined): number {
   if (!value) {
@@ -45,6 +207,10 @@ function getPortFromEnv(value: string | undefined): number {
 }
 
 function ensureServerStarted(): void {
+  wsServer.setMessageHandler((message, reply) => {
+    routeIncomingCommand(message, reply);
+  });
+
   if (!serverStartPromise) {
     log.info("plugin_initializing", { port });
     serverStartPromise = wsServer.start().then(() => {
@@ -64,6 +230,8 @@ function ensureServerStarted(): void {
         broadcastState(snapshot.sessionId, now);
       }
 
+      pollCrossProcessCommands(now);
+      pollCrossProcessResults(now);
       refreshSyncData(now);
     }, TICK_INTERVAL_MS);
   }
@@ -107,6 +275,9 @@ function haveSessionsChanged(previous: SessionInfo[], next: SessionInfo[]): bool
       left.name !== right.name ||
       left.state !== right.state ||
       left.label !== right.label ||
+      left.lastResponse !== right.lastResponse ||
+      left.pendingPermission?.permissionId !== right.pendingPermission?.permissionId ||
+      left.pendingPermission?.title !== right.pendingPermission?.title ||
       left.tokens.total !== right.tokens.total ||
       left.tokens.rate !== right.tokens.rate
     ) {
@@ -336,6 +507,27 @@ function handleEvent(event: SDKEvent): void {
     case "permission.replied": {
       const { member, groupId } = getOrCreateSession(event.properties.sessionID);
       member.sm.onPermissionReplied();
+      member.pendingPermission = null;
+      log.info("permission_cleared", {
+        permissionId: event.properties.permissionID,
+        response: event.properties.response,
+        sessionId: event.properties.sessionID,
+      });
+      broadcastState(groupId);
+      return;
+    }
+    case "message.part.updated": {
+      const part = event.properties.part;
+      if (part.type !== "text") {
+        return;
+      }
+
+      const { member, groupId } = getOrCreateSession(part.sessionID);
+      member.lastResponse = part.text.slice(-200);
+      log.debug("last_response_updated", {
+        chars: member.lastResponse.length,
+        sessionId: part.sessionID,
+      });
       broadcastState(groupId);
       return;
     }
@@ -380,7 +572,17 @@ function handleChatMessage(input: ChatMessageInput, _output: ChatMessageOutput):
 
 function handlePermissionAsk(input: PermissionAskInput): void {
   const { member, groupId } = getOrCreateSession(input.sessionID);
-  member.sm.onPermissionAsked(getPermissionLabel(input));
+  const label = getPermissionLabel(input);
+  member.sm.onPermissionAsked(label);
+  member.pendingPermission = {
+    permissionId: input.id,
+    title: input.title,
+  };
+  log.info("permission_pending", {
+    permissionId: input.id,
+    sessionId: input.sessionID,
+    title: label,
+  });
   broadcastState(groupId);
 }
 
@@ -396,7 +598,9 @@ function handleToolAfter(input: ToolAfterInput): void {
   broadcastState(groupId);
 }
 
-export const server: Plugin = async () => {
+export const server: Plugin = async (input) => {
+  sdkClient = input.client;
+  log.info("sdk_client_captured", { captured: sdkClient !== null });
   ensureServerStarted();
 
   return {
@@ -416,6 +620,7 @@ export const server: Plugin = async () => {
       handleToolAfter(input);
     },
     unload: async () => {
+      pendingCrossProcessCommands.clear();
       sharedSessionStore.remove();
       updateSyncData([], Date.now(), false);
     },

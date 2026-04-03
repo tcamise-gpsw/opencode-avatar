@@ -1,6 +1,7 @@
 import { Application, Container, Texture } from "pixi.js";
 
 import type {
+  CommandResult,
   SessionInfo,
   SessionMessage,
   StateMessage,
@@ -26,6 +27,11 @@ type SessionSnapshot = {
   name: string;
   label: string | null;
   tokens: TokenData;
+  lastResponse: string | null;
+  pendingPermission: {
+    permissionId: string;
+    title: string;
+  } | null;
 };
 
 type ManagedRobot = {
@@ -44,6 +50,9 @@ export type AvatarRendererInitOptions = {
 };
 
 export class AvatarRenderer {
+  onPrompt?: (sessionId: string, text: string) => void;
+  onPermissionReply?: (sessionId: string, permissionId: string, allow: boolean) => void;
+
   private app: Application | null = null;
   private robotLayer: Container | null = null;
   private readonly robots = new Map<string, ManagedRobot>();
@@ -57,6 +66,18 @@ export class AvatarRenderer {
   private lifecycleVersion = 0;
   private rootElement: HTMLElement | null = null;
   private tooltipElement: HTMLElement | null = null;
+  private promptPanelElement: HTMLElement | null = null;
+  private promptInputElement: HTMLInputElement | null = null;
+  private promptSendButtonElement: HTMLButtonElement | null = null;
+  private promptCloseButtonElement: HTMLButtonElement | null = null;
+  private promptFeedbackElement: HTMLElement | null = null;
+  private permissionPopupElement: HTMLElement | null = null;
+  private permissionTitleElement: HTMLElement | null = null;
+  private permissionAllowButtonElement: HTMLButtonElement | null = null;
+  private permissionDenyButtonElement: HTMLButtonElement | null = null;
+  private activePromptSessionId: string | null = null;
+  private activePermission: { sessionId: string; permissionId: string } | null = null;
+  private windowExpanded = false;
 
   async init(options: AvatarRendererInitOptions = {}): Promise<void> {
     if (this.initialized) {
@@ -93,6 +114,47 @@ export class AvatarRenderer {
           ? app.canvas.parentElement
           : null;
       this.tooltipElement = options.tooltip instanceof HTMLElement ? options.tooltip : null;
+      this.promptPanelElement = document.getElementById("prompt-panel");
+      this.promptInputElement = document.getElementById("prompt-input") as HTMLInputElement | null;
+      this.promptSendButtonElement = document.getElementById("prompt-send") as HTMLButtonElement | null;
+      this.promptCloseButtonElement = document.getElementById("prompt-close") as HTMLButtonElement | null;
+      this.promptFeedbackElement = document.getElementById("prompt-feedback");
+      this.permissionPopupElement = document.getElementById("permission-popup");
+      this.permissionTitleElement = document.getElementById("permission-title");
+      this.permissionAllowButtonElement = document.getElementById("permission-allow") as HTMLButtonElement | null;
+      this.permissionDenyButtonElement = document.getElementById("permission-deny") as HTMLButtonElement | null;
+
+      this.promptSendButtonElement?.addEventListener("click", () => {
+        this.submitPrompt();
+      });
+      this.promptCloseButtonElement?.addEventListener("click", () => {
+        this.hidePromptPanel();
+      });
+      this.promptInputElement?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          this.submitPrompt();
+          return;
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          this.hidePromptPanel();
+        }
+      });
+
+      this.permissionAllowButtonElement?.addEventListener("click", () => {
+        this.submitPermissionReply(true);
+      });
+      this.permissionDenyButtonElement?.addEventListener("click", () => {
+        this.submitPermissionReply(false);
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          this.hidePromptPanel();
+        }
+      });
       this.textures = generateSpriteTextures(app);
       this.robotLayer.eventMode = "none";
       this.app.stage.eventMode = "none";
@@ -162,6 +224,8 @@ export class AvatarRenderer {
 
     const managed = this.ensureRobot(message.sessionId, {
       label: message.label,
+      lastResponse: null,
+      pendingPermission: null,
       tokens: message.tokens,
     });
 
@@ -255,6 +319,18 @@ export class AvatarRenderer {
     this.robotLayer = null;
     this.rootElement = null;
     this.tooltipElement = null;
+    this.promptPanelElement = null;
+    this.promptInputElement = null;
+    this.promptSendButtonElement = null;
+    this.promptCloseButtonElement = null;
+    this.promptFeedbackElement = null;
+    this.permissionPopupElement = null;
+    this.permissionTitleElement = null;
+    this.permissionAllowButtonElement = null;
+    this.permissionDenyButtonElement = null;
+    this.activePromptSessionId = null;
+    this.activePermission = null;
+    this.windowExpanded = false;
     this.pendingOperations.length = 0;
     this.initialized = false;
     this.initPromise = null;
@@ -265,14 +341,21 @@ export class AvatarRenderer {
   }
 
   private upsertSession(session: SessionInfo): void {
+    const existing = this.robots.get(session.sessionId);
+    const previousPendingPermission = existing?.session.pendingPermission ?? null;
+
     const managed = this.ensureRobot(session.sessionId, {
       label: session.label,
+      lastResponse: session.lastResponse,
       name: session.name,
+      pendingPermission: session.pendingPermission,
       tokens: session.tokens,
     });
 
     managed.session.name = session.name;
     managed.session.label = session.label;
+    managed.session.lastResponse = session.lastResponse;
+    managed.session.pendingPermission = session.pendingPermission;
     managed.session.tokens = session.tokens;
 
     managed.robot.setName(session.name);
@@ -280,6 +363,8 @@ export class AvatarRenderer {
     managed.robot.setTokens(session.tokens);
     managed.robot.setDisconnected(this.disconnected);
     managed.flames.setRate(this.disconnected ? 0 : session.tokens.rate);
+
+    this.syncPermissionPopup(session.sessionId, previousPendingPermission, session.pendingPermission);
   }
 
   private ensureRobot(
@@ -315,7 +400,9 @@ export class AvatarRenderer {
       robot,
       session: {
         label: seed.label ?? null,
+        lastResponse: seed.lastResponse ?? null,
         name: seed.name ?? "",
+        pendingPermission: seed.pendingPermission ?? null,
         sessionId,
         tokens: seed.tokens ?? { total: 0, rate: 0 },
       },
@@ -340,6 +427,15 @@ export class AvatarRenderer {
     }
 
     this.robots.delete(sessionId);
+
+    if (this.activePromptSessionId === sessionId) {
+      this.hidePromptPanel();
+    }
+
+    if (this.activePermission?.sessionId === sessionId) {
+      this.hidePermissionPopup();
+    }
+
     this.robotLayer?.removeChild(managed.wrapper);
     managed.hitbox.remove();
     managed.flames.destroy();
@@ -377,6 +473,20 @@ export class AvatarRenderer {
       managed.wrapper.y = baseY - index * (LAYOUT.robotSize + LAYOUT.robotGap);
       this.positionHitbox(managed);
     });
+
+    if (this.activePromptSessionId) {
+      const managed = this.robots.get(this.activePromptSessionId);
+      if (managed && this.promptPanelElement) {
+        this.positionPanelNearRobot(this.promptPanelElement, managed);
+      }
+    }
+
+    if (this.activePermission) {
+      const managed = this.robots.get(this.activePermission.sessionId);
+      if (managed && this.permissionPopupElement) {
+        this.positionPanelNearRobot(this.permissionPopupElement, managed);
+      }
+    }
 
     this.app.renderer.resize(viewportWidth, viewportHeight);
 
@@ -443,6 +553,9 @@ export class AvatarRenderer {
     hitbox.addEventListener("pointerleave", () => {
       this.hideTooltip();
     });
+    hitbox.addEventListener("click", () => {
+      this.togglePromptPanel(sessionId);
+    });
 
     this.rootElement?.appendChild(hitbox);
     return hitbox;
@@ -461,7 +574,12 @@ export class AvatarRenderer {
     }
 
     const displayName = this.getDisplayName(managed);
-    tooltip.innerHTML = `<strong>${escapeHtml(displayName)}</strong><span>${escapeHtml(managed.session.sessionId)}</span>`;
+    const lastResponse = this.getTooltipLastResponse(managed.session.lastResponse);
+    const lastResponseLine = lastResponse
+      ? `<span class="last-response" aria-label="last response">&gt; ${escapeHtml(lastResponse)}</span>`
+      : "";
+
+    tooltip.innerHTML = `<strong>${escapeHtml(displayName)}</strong><span>${escapeHtml(managed.session.sessionId)}</span>${lastResponseLine}`;
     tooltip.style.display = "block";
     tooltip.setAttribute("aria-hidden", "false");
 
@@ -479,6 +597,227 @@ export class AvatarRenderer {
 
     tooltip.style.display = "none";
     tooltip.setAttribute("aria-hidden", "true");
+  }
+
+  showPromptResult(result: CommandResult): void {
+    if (result.success) {
+      this.setPromptFeedback("Sent", false);
+      return;
+    }
+
+    this.setPromptFeedback(result.error ?? "Failed to send command", true);
+    window.setTimeout(() => {
+      this.setPromptFeedback(null, false);
+    }, 3000);
+  }
+
+  private togglePromptPanel(sessionId: string): void {
+    if (this.activePromptSessionId === sessionId) {
+      this.hidePromptPanel();
+      return;
+    }
+
+    if (this.activePermission?.sessionId === sessionId) {
+      return;
+    }
+
+    this.showPromptPanel(sessionId);
+  }
+
+  private showPromptPanel(sessionId: string): void {
+    const panel = this.promptPanelElement;
+    const input = this.promptInputElement;
+    if (!panel || !input) {
+      return;
+    }
+
+    const managed = this.robots.get(sessionId);
+    if (!managed) {
+      return;
+    }
+
+    this.activePromptSessionId = sessionId;
+    this.hideTooltip();
+    this.positionPanelNearRobot(panel, managed);
+    panel.style.display = "block";
+    panel.classList.add("visible");
+    this.setPromptFeedback(null, false);
+    this.updateWindowExpansion();
+
+    window.setTimeout(() => {
+      input.focus();
+    }, 0);
+  }
+
+  private hidePromptPanel(): void {
+    const panel = this.promptPanelElement;
+    if (!panel) {
+      this.activePromptSessionId = null;
+      this.updateWindowExpansion();
+      return;
+    }
+
+    panel.classList.remove("visible");
+    panel.style.display = "none";
+    this.activePromptSessionId = null;
+    this.setPromptFeedback(null, false);
+    this.updateWindowExpansion();
+  }
+
+  private submitPrompt(): void {
+    const sessionId = this.activePromptSessionId;
+    const input = this.promptInputElement;
+    if (!sessionId || !input) {
+      return;
+    }
+
+    const text = input.value.trim();
+    if (text.length === 0) {
+      return;
+    }
+
+    this.onPrompt?.(sessionId, text);
+    input.value = "";
+    this.hidePromptPanel();
+  }
+
+  private setPromptFeedback(message: string | null, isError: boolean): void {
+    const feedback = this.promptFeedbackElement;
+    if (!feedback) {
+      return;
+    }
+
+    if (!message) {
+      feedback.textContent = "";
+      feedback.classList.remove("error");
+      return;
+    }
+
+    feedback.textContent = message;
+    feedback.classList.toggle("error", isError);
+  }
+
+  private syncPermissionPopup(
+    sessionId: string,
+    previous: SessionSnapshot["pendingPermission"],
+    next: SessionSnapshot["pendingPermission"],
+  ): void {
+    if (next && (!previous || previous.permissionId !== next.permissionId)) {
+      this.showPermissionPopup(sessionId, next.permissionId, next.title);
+      return;
+    }
+
+    if (!next && this.activePermission?.sessionId === sessionId) {
+      this.hidePermissionPopup();
+    }
+  }
+
+  private showPermissionPopup(sessionId: string, permissionId: string, title: string): void {
+    const popup = this.permissionPopupElement;
+    const titleElement = this.permissionTitleElement;
+    if (!popup || !titleElement) {
+      return;
+    }
+
+    const managed = this.robots.get(sessionId);
+    if (!managed) {
+      return;
+    }
+
+    if (this.activePromptSessionId === sessionId) {
+      this.hidePromptPanel();
+    }
+
+    this.activePermission = { sessionId, permissionId };
+    titleElement.textContent = title;
+    this.positionPanelNearRobot(popup, managed);
+    popup.style.display = "block";
+    popup.classList.add("visible");
+    this.updateWindowExpansion();
+  }
+
+  private hidePermissionPopup(): void {
+    const popup = this.permissionPopupElement;
+    if (popup) {
+      popup.classList.remove("visible");
+      popup.style.display = "none";
+    }
+
+    this.activePermission = null;
+    this.updateWindowExpansion();
+  }
+
+  private submitPermissionReply(allow: boolean): void {
+    const active = this.activePermission;
+    if (!active) {
+      return;
+    }
+
+    this.onPermissionReply?.(active.sessionId, active.permissionId, allow);
+  }
+
+  private positionPanelNearRobot(panel: HTMLElement, managed: ManagedRobot): void {
+    panel.style.left = "-9999px";
+    panel.style.top = "0px";
+    panel.style.display = "block";
+
+    const panelWidth = panel.offsetWidth;
+    const panelHeight = panel.offsetHeight;
+    const left = Math.max(8, managed.wrapper.x - panelWidth - 12);
+    const top = Math.max(8, managed.wrapper.y + LAYOUT.robotSize / 2 - panelHeight / 2);
+
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+  }
+
+  private updateWindowExpansion(): void {
+    const shouldExpand = this.activePromptSessionId !== null || this.activePermission !== null;
+    if (shouldExpand === this.windowExpanded) {
+      return;
+    }
+
+    this.windowExpanded = shouldExpand;
+    if (shouldExpand) {
+      void this.invokeTauri("expand_window", { width: 500 });
+    } else {
+      void this.invokeTauri("shrink_window");
+    }
+  }
+
+  private async invokeTauri(command: string, args?: Record<string, unknown>): Promise<void> {
+    try {
+      const tauri = (window as unknown as {
+        __TAURI__?: {
+          core?: {
+            invoke?: (cmd: string, payload?: Record<string, unknown>) => Promise<unknown>;
+          };
+        };
+      }).__TAURI__;
+
+      if (!tauri?.core?.invoke) {
+        return;
+      }
+
+      await tauri.core.invoke(command, args);
+    } catch (error) {
+      log.warn("window_resize_invoke_failed", {
+        command,
+        error: String(error),
+      });
+    }
+  }
+
+  private getTooltipLastResponse(lastResponse: string | null): string | null {
+    if (!lastResponse) {
+      return null;
+    }
+
+    const normalized = lastResponse.replace(/\s+/g, " ").trim();
+    if (normalized.length === 0) {
+      return null;
+    }
+
+    return normalized.length > 80 ? `${normalized.slice(0, 80)}…` : normalized;
   }
 
   private getDisplayName(managed: ManagedRobot): string {

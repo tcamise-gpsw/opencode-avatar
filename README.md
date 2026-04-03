@@ -23,13 +23,32 @@ The current implementation has three parts:
 Runtime flow:
 
 ```text
-OpenCode plugin -> WebSocket -> Tauri 2 + PixiJS app
+OpenCode plugin <-> WebSocket <-> Tauri 2 + PixiJS app
 ```
 
-- `shared/src/protocol.ts` defines avatar states plus the `session`, `state`, and `sync` WebSocket message shapes.
+- `shared/src/protocol.ts` defines avatar states plus the WebSocket message shapes used in both directions.
 - `plugin/src/index.ts` listens to OpenCode hooks, feeds `SessionStateMachine` and `TokenTracker`, writes each plugin instance's grouped snapshots to the shared state directory, and broadcasts the merged view through `AvatarWSServer`.
-- `app/src/ws-client.ts` reconnects to the plugin WebSocket and forwards messages into `AvatarRenderer`.
+- `app/src/ws-client.ts` reconnects to the plugin WebSocket, receives `session`/`state`/`sync`/`command.result`, and can send app commands (`prompt`, `permission.reply`) back to the plugin.
 - `app/src/renderer.ts` manages one robot per active session and uses `sprites.ts`, `robot.ts`, and `flames.ts` to render the overlay.
+
+## Interactive Reverse Channel (v1)
+
+The overlay now supports a reverse communication channel (app → plugin → OpenCode SDK):
+
+- **Last response preview:** hover a robot to see the latest assistant text snippet in the tooltip.
+- **Click-to-prompt:** click a robot to open an input panel and send text into that session.
+- **Permission popup:** when a session is waiting on permission, a popup appears near the robot with Allow/Deny.
+
+Protocol additions in `shared/src/protocol.ts`:
+
+- App → Plugin: `type: "command"` with `command: "prompt" | "permission.reply"`
+- Plugin → App: `type: "command.result"`
+- `SessionInfo` now includes `lastResponse` and `pendingPermission`.
+
+For multi-process OpenCode setups, cross-process command routing uses shared files in `~/.opencode-avatar/state/`:
+
+- `cmd-<requestId>.json`
+- `result-<requestId>.json`
 
 More detail lives in `docs/architecture.md`.
 
@@ -148,6 +167,7 @@ To change the plugin WebSocket port, export `AVATAR_WS_PORT` in the environment 
 
 - The plugin writes newline-delimited JSON logs to `~/.opencode-avatar/logs/plugin.log`.
 - The plugin also writes per-process session snapshots to `~/.opencode-avatar/state/` so one plugin instance can merge sessions from multiple OpenCode processes.
+- The plugin now also writes cross-process command and result files in that state directory (`cmd-*.json`, `result-*.json`).
 - The frontend TypeScript logger currently writes structured logs to the browser console and respects `VITE_LOG_LEVEL` and `VITE_DEBUG`.
 - The Tauri Rust shell enables `tauri-plugin-log` in debug builds, but this repo does not currently configure the frontend app to persist its own logs into `~/.opencode-avatar/logs/`.
 

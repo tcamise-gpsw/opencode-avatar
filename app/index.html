@@ -7,10 +7,12 @@
     <style>
       * { margin: 0; padding: 0; }
       html, body { overflow: hidden; background: transparent; }
+      body { pointer-events: none; }
       #app {
         width: 100vw;
         height: 100vh;
         position: relative;
+        pointer-events: none;
       }
       #robot-tooltip {
         position: fixed;
@@ -25,7 +27,7 @@
         font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
         box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35);
         pointer-events: none;
-        white-space: nowrap;
+        white-space: normal;
         z-index: 9999;
       }
       #robot-tooltip strong {
@@ -38,11 +40,103 @@
         display: block;
         color: #94a3b8;
       }
+      #robot-tooltip .last-response {
+        margin-top: 4px;
+        font-size: 11px;
+        color: #cbd5e1;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+      }
+
+      .panel {
+        position: fixed;
+        display: none;
+        min-width: 220px;
+        max-width: 320px;
+        padding: 10px;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.95);
+        color: #e2e8f0;
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35);
+        pointer-events: auto;
+        z-index: 9999;
+        opacity: 0;
+        transform: translateY(4px);
+        transition: opacity 120ms ease, transform 120ms ease;
+      }
+
+      .panel.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      #prompt-panel .row,
+      #permission-popup .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      #prompt-panel input {
+        flex: 1;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        border-radius: 6px;
+        background: rgba(2, 6, 23, 0.85);
+        color: #e2e8f0;
+        padding: 6px 8px;
+        font: inherit;
+        pointer-events: auto;
+      }
+
+      #prompt-panel button,
+      #permission-popup button {
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        border-radius: 6px;
+        background: rgba(15, 23, 42, 0.95);
+        color: #e2e8f0;
+        padding: 6px 10px;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      #prompt-feedback {
+        min-height: 16px;
+        margin-top: 8px;
+        color: #94a3b8;
+      }
+
+      #prompt-feedback.error {
+        color: #fca5a5;
+      }
+
+      #permission-title {
+        margin-bottom: 8px;
+        color: #f8fafc;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <div id="robot-tooltip" role="tooltip" aria-hidden="true"></div>
+    <div id="prompt-panel" class="panel" aria-hidden="true">
+      <div class="row">
+        <input id="prompt-input" type="text" placeholder="Send a prompt…" />
+        <button id="prompt-send" type="button">Send</button>
+        <button id="prompt-close" type="button">✕</button>
+      </div>
+      <p id="prompt-feedback"></p>
+    </div>
+    <div id="permission-popup" class="panel" aria-hidden="true">
+      <p id="permission-title"></p>
+      <div class="row">
+        <button id="permission-allow" type="button">Allow</button>
+        <button id="permission-deny" type="button">Deny</button>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

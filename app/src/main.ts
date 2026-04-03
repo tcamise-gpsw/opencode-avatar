@@ -2,6 +2,10 @@ import { createLogger } from "./logger.js";
 import { AvatarRenderer } from "./renderer.js";
 import { AvatarWSClient } from "./ws-client.js";
 
+type PendingRequestContext = {
+  kind: "prompt" | "permission.reply";
+};
+
 type ImportMetaEnvLike = {
   readonly VITE_AVATAR_WS_URL?: string;
 };
@@ -63,6 +67,18 @@ async function bootstrap(): Promise<void> {
     onDisconnected: () => {
       renderer.setDisconnected(true);
     },
+    onCommandResult: (message) => {
+      const context = pendingRequests.get(message.requestId);
+      if (context) {
+        pendingRequests.delete(message.requestId);
+      }
+
+      if (context?.kind === "prompt") {
+        renderer.showPromptResult(message);
+      } else if (!message.success) {
+        renderer.showPromptResult(message);
+      }
+    },
     onSession: (message) => {
       renderer.applySession(message);
     },
@@ -75,6 +91,33 @@ async function bootstrap(): Promise<void> {
   });
 
   let cleanedUp = false;
+  const pendingRequests = new Map<string, PendingRequestContext>();
+
+  renderer.onPrompt = (sessionId, text) => {
+    const requestId = crypto.randomUUID();
+    pendingRequests.set(requestId, { kind: "prompt" });
+    wsClient.send({
+      type: "command",
+      command: "prompt",
+      sessionId,
+      text,
+      requestId,
+    });
+  };
+
+  renderer.onPermissionReply = (sessionId, permissionId, allow) => {
+    const requestId = crypto.randomUUID();
+    pendingRequests.set(requestId, { kind: "permission.reply" });
+    wsClient.send({
+      type: "command",
+      command: "permission.reply",
+      sessionId,
+      permissionId,
+      allow,
+      requestId,
+    });
+  };
+
   const cleanup = () => {
     if (cleanedUp) {
       return;

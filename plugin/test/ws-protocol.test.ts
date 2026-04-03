@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import type {
+  AppMessage,
+  CommandResult,
   PluginMessage,
   StateMessage,
   SyncMessage,
@@ -108,6 +110,8 @@ describe("AvatarWSServer", () => {
         state: "thinking",
         label: "test",
         tokens: { total: 100, rate: 50 },
+        lastResponse: null,
+        pendingPermission: null,
       },
     ]);
 
@@ -122,6 +126,8 @@ describe("AvatarWSServer", () => {
         state: "thinking",
         label: "test",
         tokens: { total: 100, rate: 50 },
+        lastResponse: null,
+        pendingPermission: null,
       },
     ]);
 
@@ -166,5 +172,123 @@ describe("AvatarWSServer", () => {
 
     ws.close();
     await restartingServer.stop();
+  });
+
+  it("routes prompt commands to message handler and replies on same socket", async () => {
+    const { ws } = await connectWithFirstMessage();
+    const seen: AppMessage[] = [];
+
+    server.setMessageHandler((message, reply) => {
+      seen.push(message);
+      reply({
+        type: "command.result",
+        requestId: message.requestId,
+        success: true,
+      });
+    });
+
+    const sent = {
+      type: "command",
+      command: "prompt",
+      sessionId: "session-1",
+      text: "hello",
+      requestId: "req-1",
+    } as const;
+
+    const received = nextMessage(ws) as Promise<CommandResult>;
+    ws.send(JSON.stringify(sent));
+
+    await expect(received).resolves.toEqual({
+      type: "command.result",
+      requestId: "req-1",
+      success: true,
+    });
+    expect(seen).toEqual([sent]);
+
+    ws.close();
+  });
+
+  it("routes permission.reply commands to message handler", async () => {
+    const { ws } = await connectWithFirstMessage();
+    const seen: AppMessage[] = [];
+
+    server.setMessageHandler((message, reply) => {
+      seen.push(message);
+      reply({
+        type: "command.result",
+        requestId: message.requestId,
+        success: true,
+      });
+    });
+
+    const sent = {
+      type: "command",
+      command: "permission.reply",
+      sessionId: "session-2",
+      permissionId: "perm-1",
+      allow: false,
+      requestId: "req-2",
+    } as const;
+
+    const received = nextMessage(ws) as Promise<CommandResult>;
+    ws.send(JSON.stringify(sent));
+
+    await expect(received).resolves.toEqual({
+      type: "command.result",
+      requestId: "req-2",
+      success: true,
+    });
+    expect(seen).toEqual([sent]);
+
+    ws.close();
+  });
+
+  it("keeps connection open and ignores malformed json", async () => {
+    const { ws } = await connectWithFirstMessage();
+    const handler = vi.fn();
+    server.setMessageHandler(handler);
+
+    ws.send("{ definitely not valid json");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+
+    ws.close();
+  });
+
+  it("forwards unknown command values to handler for decision", async () => {
+    const { ws } = await connectWithFirstMessage();
+    const seen: AppMessage[] = [];
+
+    server.setMessageHandler((message, reply) => {
+      seen.push(message);
+      reply({
+        type: "command.result",
+        requestId: message.requestId,
+        success: false,
+        error: "unknown command",
+      });
+    });
+
+    const sent = {
+      type: "command",
+      command: "unknown.command",
+      sessionId: "session-3",
+      requestId: "req-3",
+    } as unknown as AppMessage;
+
+    const received = nextMessage(ws) as Promise<CommandResult>;
+    ws.send(JSON.stringify(sent));
+
+    await expect(received).resolves.toEqual({
+      type: "command.result",
+      requestId: "req-3",
+      success: false,
+      error: "unknown command",
+    });
+    expect(seen).toEqual([sent]);
+
+    ws.close();
   });
 });

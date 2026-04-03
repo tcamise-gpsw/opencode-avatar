@@ -7,6 +7,11 @@ export interface SessionMemberRuntime {
   readonly sm: SessionStateMachine;
   readonly tokens: TokenTracker;
   readonly assistantMessageTotals: Map<string, number>;
+  lastResponse: string | null;
+  pendingPermission: {
+    permissionId: string;
+    title: string;
+  } | null;
 }
 
 type SessionMeta = {
@@ -64,6 +69,8 @@ export class SessionRegistry {
           sm: new SessionStateMachine(sessionId),
           tokens: new TokenTracker(),
           assistantMessageTotals: new Map(),
+          lastResponse: null,
+          pendingPermission: null,
         },
       };
       this.sessions.set(sessionId, meta);
@@ -161,6 +168,7 @@ export class SessionRegistry {
     }
 
     let primary: SessionInfo | null = null;
+    let primaryMember: SessionMemberRuntime | null = null;
     let totalTokens = 0;
     let totalRate = 0;
 
@@ -174,6 +182,7 @@ export class SessionRegistry {
 
       if (!primary || STATE_PRIORITY[snapshot.state] <= STATE_PRIORITY[primary.state]) {
         primary = snapshot;
+        primaryMember = member;
       }
     }
 
@@ -190,6 +199,8 @@ export class SessionRegistry {
         total: totalTokens,
         rate: totalRate,
       },
+      lastResponse: primaryMember?.lastResponse ?? null,
+      pendingPermission: primaryMember?.pendingPermission ?? null,
     };
   }
 
