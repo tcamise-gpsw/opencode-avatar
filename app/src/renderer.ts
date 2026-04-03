@@ -22,10 +22,10 @@ const RENDERER_WIDTH = LAYOUT.robotSize + LAYOUT.edgeMargin * 2;
 const FLAME_SCALE = LAYOUT.robotSize / FRAME_SIZE;
 const FLAME_Y = LAYOUT.robotSize - 4;
 const EXPANDED_OVERLAY_WIDTH = 920;
-const PROMPT_PANEL_LEFT_BIAS = 220;
-const TOOLTIP_GAP = 20;
-const TOOLTIP_LEFT_BIAS = 48;
-const TOOLTIP_MAX_WIDTH = 520;
+const PROMPT_PANEL_LEFT_BIAS = 0;
+const TOOLTIP_GAP = 8;
+const TOOLTIP_LEFT_BIAS = 0;
+const TOOLTIP_MAX_WIDTH = 416;
 const PROMPT_MAX_WIDTH = 420;
 const TOOLTIP_SHOW_DELAY_MS = 150;
 const TOOLTIP_HIDE_DELAY_MS = 120;
@@ -1094,7 +1094,7 @@ export class AvatarRenderer {
 
   private positionPanelNearRobot(panel: HTMLElement, managed: ManagedRobot): void {
     const margin = 8;
-    const gap = 12;
+    const gap = 8;
     const isPromptPanel = panel.id === "prompt-panel";
     const leftBias = isPromptPanel ? PROMPT_PANEL_LEFT_BIAS : 0;
     const robotSize = this.getManagedRobotSize(managed);
