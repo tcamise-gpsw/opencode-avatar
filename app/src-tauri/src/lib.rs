@@ -1,7 +1,7 @@
 const DEFAULT_WINDOW_WIDTH: u32 = 200;
 
 #[tauri::command]
-fn expand_window(window: tauri::WebviewWindow, width: u32) -> Result<(), String> {
+fn expand_window(window: tauri::Window, width: u32) -> Result<(), String> {
   let current_size = window.outer_size().map_err(|error| error.to_string())?;
   let current_position = window.outer_position().map_err(|error| error.to_string())?;
 
@@ -31,7 +31,7 @@ fn expand_window(window: tauri::WebviewWindow, width: u32) -> Result<(), String>
 }
 
 #[tauri::command]
-fn shrink_window(window: tauri::WebviewWindow) -> Result<(), String> {
+fn shrink_window(window: tauri::Window) -> Result<(), String> {
   let current_size = window.outer_size().map_err(|error| error.to_string())?;
   let current_position = window.outer_position().map_err(|error| error.to_string())?;
 
