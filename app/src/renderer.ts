@@ -27,6 +27,8 @@ const TOOLTIP_GAP = 20;
 const TOOLTIP_LEFT_BIAS = 48;
 const TOOLTIP_MAX_WIDTH = 520;
 const PROMPT_MAX_WIDTH = 420;
+const TOOLTIP_SHOW_DELAY_MS = 150;
+const TOOLTIP_HIDE_DELAY_MS = 120;
 
 let tauriInvoke: ((command: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 
@@ -88,6 +90,8 @@ export class AvatarRenderer {
   private activeTooltipSessionId: string | null = null;
   private windowExpanded = false;
   private resizeSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  private tooltipShowTimer: ReturnType<typeof setTimeout> | null = null;
+  private tooltipHideTimer: ReturnType<typeof setTimeout> | null = null;
 
   async init(options: AvatarRendererInitOptions = {}): Promise<void> {
     if (this.initialized) {
@@ -346,6 +350,14 @@ export class AvatarRenderer {
       clearTimeout(this.resizeSettleTimer);
       this.resizeSettleTimer = null;
     }
+    if (this.tooltipShowTimer) {
+      clearTimeout(this.tooltipShowTimer);
+      this.tooltipShowTimer = null;
+    }
+    if (this.tooltipHideTimer) {
+      clearTimeout(this.tooltipHideTimer);
+      this.tooltipHideTimer = null;
+    }
     this.pendingOperations.length = 0;
     this.initialized = false;
     this.initPromise = null;
@@ -599,22 +611,37 @@ export class AvatarRenderer {
       return;
     }
 
+    if (this.tooltipHideTimer) {
+      clearTimeout(this.tooltipHideTimer);
+      this.tooltipHideTimer = null;
+    }
+
+    if (this.activeTooltipSessionId === sessionId && tooltip.style.display === "block") {
+      this.positionTooltipNearRobot(tooltip, managed);
+      return;
+    }
+
+    if (this.activeTooltipSessionId === sessionId && this.tooltipShowTimer) {
+      return;
+    }
+
     const displayName = this.getDisplayName(managed);
     const lastResponse = this.getTooltipLastResponse(managed.session.lastResponse);
+    const lastResponseHtml = lastResponse ? renderTooltipMarkdown(lastResponse) : null;
     const lastResponseLine = lastResponse
-      ? `<span class="last-response" aria-label="last response">&gt; ${escapeHtml(lastResponse)}</span>`
+      ? `<span class="last-response" aria-label="last response">${lastResponseHtml}</span>`
       : "";
 
     tooltip.innerHTML = `<strong>${escapeHtml(displayName)}</strong>${lastResponseLine}`;
-    tooltip.style.display = "block";
-    tooltip.setAttribute("aria-hidden", "false");
+    tooltip.style.display = "none";
+    tooltip.setAttribute("aria-hidden", "true");
 
+    const wasExpanded = this.windowExpanded;
     this.activeTooltipSessionId = sessionId;
     this.updateWindowExpansion();
-    this.positionTooltipNearRobot(tooltip, managed);
 
-    // Re-position after resize settles so tooltip stays clear of robot.
-    requestAnimationFrame(() => {
+    const showResolvedTooltip = () => {
+      this.tooltipShowTimer = null;
       if (this.activeTooltipSessionId !== sessionId || !this.tooltipElement) {
         return;
       }
@@ -622,8 +649,21 @@ export class AvatarRenderer {
       if (!liveManaged) {
         return;
       }
+
       this.positionTooltipNearRobot(this.tooltipElement, liveManaged);
-    });
+      this.tooltipElement.style.display = "block";
+      this.tooltipElement.setAttribute("aria-hidden", "false");
+    };
+
+    if (this.tooltipShowTimer) {
+      clearTimeout(this.tooltipShowTimer);
+      this.tooltipShowTimer = null;
+    }
+
+    this.tooltipShowTimer = setTimeout(
+      showResolvedTooltip,
+      wasExpanded ? 0 : TOOLTIP_SHOW_DELAY_MS,
+    );
   }
 
   private hideTooltip(): void {
@@ -632,10 +672,27 @@ export class AvatarRenderer {
       return;
     }
 
-    tooltip.style.display = "none";
-    tooltip.setAttribute("aria-hidden", "true");
-    this.activeTooltipSessionId = null;
-    this.updateWindowExpansion();
+    if (this.tooltipShowTimer) {
+      clearTimeout(this.tooltipShowTimer);
+      this.tooltipShowTimer = null;
+    }
+
+    if (this.tooltipHideTimer) {
+      clearTimeout(this.tooltipHideTimer);
+      this.tooltipHideTimer = null;
+    }
+
+    this.tooltipHideTimer = setTimeout(() => {
+      this.tooltipHideTimer = null;
+      if (!this.tooltipElement) {
+        return;
+      }
+
+      this.tooltipElement.style.display = "none";
+      this.tooltipElement.setAttribute("aria-hidden", "true");
+      this.activeTooltipSessionId = null;
+      this.updateWindowExpansion();
+    }, TOOLTIP_HIDE_DELAY_MS);
   }
 
   showPromptResult(result: CommandResult): void {
@@ -907,7 +964,10 @@ export class AvatarRenderer {
       return null;
     }
 
-    const normalized = lastResponse.replace(/\s+/g, " ").trim();
+    const normalized = lastResponse
+      .replaceAll("\r\n", "\n")
+      .replaceAll("\r", "\n")
+      .trim();
     if (normalized.length === 0) {
       return null;
     }
@@ -963,4 +1023,31 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function renderTooltipMarkdown(value: string): string {
+  const escaped = escapeHtml(value);
+  const codeSpans: string[] = [];
+
+  let working = escaped.replace(/`([^`\n]+)`/g, (_match, code) => {
+    const index = codeSpans.push(code) - 1;
+    return `@@CODE_${index}@@`;
+  });
+
+  working = working
+    .replace(/^#{1,6}\s+(.+)$/gm, "<strong>$1</strong>")
+    .replace(/^(?:-|\*)\s+(.+)$/gm, "• $1")
+    .replace(/\*\*([^\n*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^\n_]+)__/g, "<strong>$1</strong>")
+    .replace(/~~([^\n~]+)~~/g, "<s>$1</s>")
+    .replace(/(^|[^*])\*([^\n*]+)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/(^|[^_])_([^\n_]+)_(?!_)/g, "$1<em>$2</em>");
+
+  working = working.replace(/@@CODE_(\d+)@@/g, (_match, rawIndex) => {
+    const index = Number(rawIndex);
+    const code = codeSpans[index] ?? "";
+    return `<code>${code}</code>`;
+  });
+
+  return working.replaceAll("\n", "<br />");
 }
