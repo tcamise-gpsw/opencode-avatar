@@ -31,6 +31,11 @@ OpenCode plugin <-> WebSocket <-> Tauri 2 + PixiJS app
 - `app/src/ws-client.ts` reconnects to the plugin WebSocket, receives `session`/`state`/`sync`/`command.result`, and can send app commands (`prompt`, `permission.reply`) back to the plugin.
 - `app/src/renderer.ts` manages one robot per active session and uses `sprites.ts`, `robot.ts`, and `flames.ts` to render the overlay.
 
+Recent state-machine hardening:
+
+- Tool names are normalized case-insensitively (for example `read`, `Read`, `READ`) before state mapping and tool lifecycle matching.
+- The plugin emits info-level `session_state_summary` logs on major transitions (`tool.before`, `tool.after`, session/permission/error events) to make stuck-state diagnosis easier without full debug logging.
+
 ## Interactive Reverse Channel (v1)
 
 The overlay now supports a reverse communication channel (app → plugin → OpenCode SDK):
@@ -170,6 +175,8 @@ To change the plugin WebSocket port, export `AVATAR_WS_PORT` in the environment 
 - The plugin now also writes cross-process command and result files in that state directory (`cmd-*.json`, `result-*.json`).
 - The frontend TypeScript logger currently writes structured logs to the browser console and respects `VITE_LOG_LEVEL` and `VITE_DEBUG`.
 - The Tauri Rust shell enables `tauri-plugin-log` in debug builds, but this repo does not currently configure the frontend app to persist its own logs into `~/.opencode-avatar/logs/`.
+
+For troubleshooting workflows (including `session_state_summary` interpretation and stuck-state triage), see `docs/troubleshooting.md`.
 
 ## Current Notes
 

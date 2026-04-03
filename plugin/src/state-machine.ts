@@ -19,6 +19,14 @@ interface ActiveTool {
   label: string | null;
 }
 
+export interface SessionStateDiagnostics {
+  activeToolCount: number;
+  activeTools: string[];
+  hasError: boolean;
+  hasWaiting: boolean;
+  isThinking: boolean;
+}
+
 export class SessionStateMachine {
   private readonly sessionId: string;
   private sessionName = "";
@@ -104,17 +112,19 @@ export class SessionStateMachine {
   }
 
   onToolStart(toolName: string, args: Record<string, unknown>): void {
-    const state = TOOL_STATE_MAP[toolName] ?? DEFAULT_TOOL_STATE;
-    const label = this.makeToolLabel(toolName, args);
+    const normalizedToolName = this.normalizeToolName(toolName);
+    const state = this.resolveToolState(toolName, normalizedToolName);
+    const label = this.makeToolLabel(normalizedToolName, args);
 
-    this.activeTools.push({ name: toolName, state, label });
+    this.activeTools.push({ name: normalizedToolName, state, label });
     this.isThinking = false;
 
-    log.debug("tool_start", { sessionId: this.sessionId, toolName, state, label });
+    log.debug("tool_start", { sessionId: this.sessionId, toolName: normalizedToolName, state, label });
   }
 
   onToolEnd(toolName: string): void {
-    const index = this.findLastToolIndex(toolName);
+    const normalizedToolName = this.normalizeToolName(toolName);
+    const index = this.findLastToolIndex(normalizedToolName);
     if (index === -1) {
       return;
     }
@@ -127,7 +137,7 @@ export class SessionStateMachine {
       this.holdUntil = this.now + TOOL_HOLD_MS;
     }
 
-    log.debug("tool_end", { sessionId: this.sessionId, toolName });
+    log.debug("tool_end", { sessionId: this.sessionId, toolName: normalizedToolName });
   }
 
   onMessageDelta(): void {
@@ -175,6 +185,18 @@ export class SessionStateMachine {
     };
   }
 
+  getDiagnostics(): SessionStateDiagnostics {
+    this.clearExpiredState();
+
+    return {
+      activeToolCount: this.activeTools.length,
+      activeTools: this.activeTools.map((tool) => tool.name),
+      hasError: this.errorLabel !== null,
+      hasWaiting: this.waitingLabel !== null,
+      isThinking: this.isThinking,
+    };
+  }
+
   private getHighestPriorityTool(): ActiveTool | null {
     let best: ActiveTool | null = null;
 
@@ -216,22 +238,44 @@ export class SessionStateMachine {
 
   private makeToolLabel(toolName: string, args: Record<string, unknown>): string | null {
     switch (toolName) {
-      case "Read":
+      case "read":
         return `Reading ${this.getStringArg(args, "path") ?? this.getStringArg(args, "filePath") ?? "file"}`;
-      case "Edit":
+      case "edit":
         return `Editing ${this.getStringArg(args, "filePath") ?? "file"}`;
-      case "Write":
+      case "write":
         return `Writing ${this.getStringArg(args, "filePath") ?? "file"}`;
-      case "Grep":
+      case "grep":
         return `Searching ${this.getStringArg(args, "pattern") ?? ""}`.trimEnd();
-      case "Glob":
+      case "glob":
         return `Finding ${this.getStringArg(args, "pattern") ?? ""}`.trimEnd();
-      case "Bash": {
+      case "bash": {
         const command = this.getStringArg(args, "command") ?? "command";
         return `Running ${command.slice(0, 40)}`;
       }
       default:
         return null;
+    }
+  }
+
+  private normalizeToolName(toolName: string): string {
+    return toolName.trim().toLowerCase();
+  }
+
+  private resolveToolState(toolName: string, normalizedToolName: string): AvatarState {
+    switch (normalizedToolName) {
+      case "read":
+      case "grep":
+      case "glob":
+        return "reading";
+      case "edit":
+      case "write":
+        return "editing";
+      case "bash":
+        return "running";
+      case "task":
+        return "thinking";
+      default:
+        return TOOL_STATE_MAP[normalizedToolName] ?? TOOL_STATE_MAP[toolName] ?? DEFAULT_TOOL_STATE;
     }
   }
 

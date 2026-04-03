@@ -112,13 +112,19 @@ export type PluginMessage = StateMessage | SessionMessage | SyncMessage | Comman
 export const TOOL_STATE_MAP: Record<string, AvatarState> = {
   // Reading tools
   Read: "reading",
+  read: "reading",
   Grep: "reading",
+  grep: "reading",
   Glob: "reading",
+  glob: "reading",
   // Editing tools
   Edit: "editing",
+  edit: "editing",
   Write: "editing",
+  write: "editing",
   // Running tools
   Bash: "running",
+  bash: "running",
   // Browser tools (reading)
   playwright_browser_snapshot: "reading",
   playwright_browser_take_screenshot: "reading",
@@ -126,6 +132,7 @@ export const TOOL_STATE_MAP: Record<string, AvatarState> = {
   playwright_browser_click: "running",
   // Task/subagent tools
   Task: "thinking",
+  task: "thinking",
 };
 
 /** Default state for tools not in the map */
