@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: corepack pnpm install --frozen-lockfile
 
+      - name: Build shared package for tests
+        run: corepack pnpm --filter @opencode-avatar/shared build
+
       - name: Run tests
         run: corepack pnpm test
 
