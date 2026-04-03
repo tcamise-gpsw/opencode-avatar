@@ -21,6 +21,14 @@ const MIN_CANVAS_HEIGHT = 100;
 const RENDERER_WIDTH = LAYOUT.robotSize + LAYOUT.edgeMargin * 2;
 const FLAME_SCALE = LAYOUT.robotSize / FRAME_SIZE;
 const FLAME_Y = LAYOUT.robotSize - 4;
+const EXPANDED_OVERLAY_WIDTH = 920;
+const PROMPT_PANEL_LEFT_BIAS = 220;
+const TOOLTIP_GAP = 20;
+const TOOLTIP_LEFT_BIAS = 48;
+const TOOLTIP_MAX_WIDTH = 520;
+const PROMPT_MAX_WIDTH = 420;
+
+let tauriInvoke: ((command: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 
 type SessionSnapshot = {
   sessionId: string;
@@ -77,7 +85,9 @@ export class AvatarRenderer {
   private permissionDenyButtonElement: HTMLButtonElement | null = null;
   private activePromptSessionId: string | null = null;
   private activePermission: { sessionId: string; permissionId: string } | null = null;
+  private activeTooltipSessionId: string | null = null;
   private windowExpanded = false;
+  private resizeSettleTimer: ReturnType<typeof setTimeout> | null = null;
 
   async init(options: AvatarRendererInitOptions = {}): Promise<void> {
     if (this.initialized) {
@@ -330,7 +340,12 @@ export class AvatarRenderer {
     this.permissionDenyButtonElement = null;
     this.activePromptSessionId = null;
     this.activePermission = null;
+    this.activeTooltipSessionId = null;
     this.windowExpanded = false;
+    if (this.resizeSettleTimer) {
+      clearTimeout(this.resizeSettleTimer);
+      this.resizeSettleTimer = null;
+    }
     this.pendingOperations.length = 0;
     this.initialized = false;
     this.initPromise = null;
@@ -436,6 +451,10 @@ export class AvatarRenderer {
       this.hidePermissionPopup();
     }
 
+    if (this.activeTooltipSessionId === sessionId) {
+      this.hideTooltip();
+    }
+
     this.robotLayer?.removeChild(managed.wrapper);
     managed.hitbox.remove();
     managed.flames.destroy();
@@ -485,6 +504,13 @@ export class AvatarRenderer {
       const managed = this.robots.get(this.activePermission.sessionId);
       if (managed && this.permissionPopupElement) {
         this.positionPanelNearRobot(this.permissionPopupElement, managed);
+      }
+    }
+
+    if (this.activeTooltipSessionId) {
+      const managed = this.robots.get(this.activeTooltipSessionId);
+      if (managed && this.tooltipElement) {
+        this.positionTooltipNearRobot(this.tooltipElement, managed);
       }
     }
 
@@ -544,11 +570,11 @@ export class AvatarRenderer {
     hitbox.style.background = "transparent";
     hitbox.style.zIndex = "9998";
 
-    hitbox.addEventListener("pointerenter", (event) => {
-      this.showTooltip(sessionId, event.clientX, event.clientY);
+    hitbox.addEventListener("pointerenter", () => {
+      this.showTooltip(sessionId);
     });
-    hitbox.addEventListener("pointermove", (event) => {
-      this.showTooltip(sessionId, event.clientX, event.clientY);
+    hitbox.addEventListener("pointermove", () => {
+      this.showTooltip(sessionId);
     });
     hitbox.addEventListener("pointerleave", () => {
       this.hideTooltip();
@@ -566,7 +592,7 @@ export class AvatarRenderer {
     managed.hitbox.style.top = `${managed.wrapper.y}px`;
   }
 
-  private showTooltip(sessionId: string, clientX: number, clientY: number): void {
+  private showTooltip(sessionId: string): void {
     const tooltip = this.tooltipElement;
     const managed = this.robots.get(sessionId);
     if (!tooltip || !managed) {
@@ -579,14 +605,25 @@ export class AvatarRenderer {
       ? `<span class="last-response" aria-label="last response">&gt; ${escapeHtml(lastResponse)}</span>`
       : "";
 
-    tooltip.innerHTML = `<strong>${escapeHtml(displayName)}</strong><span>${escapeHtml(managed.session.sessionId)}</span>${lastResponseLine}`;
+    tooltip.innerHTML = `<strong>${escapeHtml(displayName)}</strong>${lastResponseLine}`;
     tooltip.style.display = "block";
     tooltip.setAttribute("aria-hidden", "false");
 
-    const left = Math.max(8, clientX - tooltip.offsetWidth - 12);
-    const top = Math.max(8, clientY - tooltip.offsetHeight / 2);
-    tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${top}px`;
+    this.activeTooltipSessionId = sessionId;
+    this.updateWindowExpansion();
+    this.positionTooltipNearRobot(tooltip, managed);
+
+    // Re-position after resize settles so tooltip stays clear of robot.
+    requestAnimationFrame(() => {
+      if (this.activeTooltipSessionId !== sessionId || !this.tooltipElement) {
+        return;
+      }
+      const liveManaged = this.robots.get(sessionId);
+      if (!liveManaged) {
+        return;
+      }
+      this.positionTooltipNearRobot(this.tooltipElement, liveManaged);
+    });
   }
 
   private hideTooltip(): void {
@@ -597,6 +634,8 @@ export class AvatarRenderer {
 
     tooltip.style.display = "none";
     tooltip.setAttribute("aria-hidden", "true");
+    this.activeTooltipSessionId = null;
+    this.updateWindowExpansion();
   }
 
   showPromptResult(result: CommandResult): void {
@@ -757,48 +796,104 @@ export class AvatarRenderer {
   }
 
   private positionPanelNearRobot(panel: HTMLElement, managed: ManagedRobot): void {
+    const margin = 8;
+    const gap = 12;
+    const isPromptPanel = panel.id === "prompt-panel";
+    const leftBias = isPromptPanel ? PROMPT_PANEL_LEFT_BIAS : 0;
+
+    if (isPromptPanel) {
+      const maxSpace = Math.max(120, Math.floor(managed.wrapper.x - gap - margin));
+      const effectiveBias = Math.min(leftBias, Math.max(0, maxSpace - PROMPT_MAX_WIDTH));
+      const targetWidth = Math.max(120, Math.min(PROMPT_MAX_WIDTH, maxSpace - effectiveBias));
+      panel.style.width = `${targetWidth}px`;
+      panel.style.maxWidth = `${targetWidth}px`;
+    }
+
     panel.style.left = "-9999px";
     panel.style.top = "0px";
     panel.style.display = "block";
 
     const panelWidth = panel.offsetWidth;
     const panelHeight = panel.offsetHeight;
-    const left = Math.max(8, managed.wrapper.x - panelWidth - 12);
-    const top = Math.max(8, managed.wrapper.y + LAYOUT.robotSize / 2 - panelHeight / 2);
+    const maxLeft = Math.max(margin, window.innerWidth - panelWidth - margin);
+    const maxTop = Math.max(margin, window.innerHeight - panelHeight - margin);
+
+    const preferredLeft = managed.wrapper.x - panelWidth - gap - leftBias;
+    const fallbackRight = managed.wrapper.x + LAYOUT.robotSize + gap;
+    const left = isPromptPanel
+      ? Math.min(maxLeft, Math.max(margin, preferredLeft))
+      : Math.min(maxLeft, Math.max(margin, preferredLeft < margin ? fallbackRight : preferredLeft));
+
+    const centeredTop = managed.wrapper.y + LAYOUT.robotSize / 2 - panelHeight / 2;
+    const top = Math.min(maxTop, Math.max(margin, centeredTop));
 
     panel.style.left = `${left}px`;
     panel.style.top = `${top}px`;
   }
 
   private updateWindowExpansion(): void {
-    const shouldExpand = this.activePromptSessionId !== null || this.activePermission !== null;
+    const shouldExpand =
+      this.activePromptSessionId !== null ||
+      this.activePermission !== null ||
+      this.activeTooltipSessionId !== null;
     if (shouldExpand === this.windowExpanded) {
       return;
     }
 
     this.windowExpanded = shouldExpand;
     if (shouldExpand) {
-      void this.invokeTauri("expand_window", { width: 500 });
+      void this.invokeTauri("expand_window", { width: EXPANDED_OVERLAY_WIDTH });
     } else {
       void this.invokeTauri("shrink_window");
     }
+
+    this.scheduleFloatingReposition();
+  }
+
+  private scheduleFloatingReposition(): void {
+    if (this.resizeSettleTimer) {
+      clearTimeout(this.resizeSettleTimer);
+    }
+
+    this.resizeSettleTimer = setTimeout(() => {
+      this.resizeSettleTimer = null;
+      this.relayout();
+    }, 120);
   }
 
   private async invokeTauri(command: string, args?: Record<string, unknown>): Promise<void> {
     try {
-      const tauri = (window as unknown as {
-        __TAURI__?: {
-          core?: {
-            invoke?: (cmd: string, payload?: Record<string, unknown>) => Promise<unknown>;
-          };
-        };
-      }).__TAURI__;
+      if (!tauriInvoke) {
+        try {
+          const module = await import("@tauri-apps/api/core");
+          if (typeof module.invoke === "function") {
+            tauriInvoke = module.invoke;
+          }
+        } catch {
+          // Fallback to global bridge below.
+        }
 
-      if (!tauri?.core?.invoke) {
+        if (!tauriInvoke) {
+          const tauri = (window as unknown as {
+            __TAURI__?: {
+              core?: {
+                invoke?: (cmd: string, payload?: Record<string, unknown>) => Promise<unknown>;
+              };
+            };
+          }).__TAURI__;
+
+          if (typeof tauri?.core?.invoke === "function") {
+            tauriInvoke = tauri.core.invoke;
+          }
+        }
+      }
+
+      if (!tauriInvoke) {
+        log.warn("window_resize_invoke_unavailable", { command });
         return;
       }
 
-      await tauri.core.invoke(command, args);
+      await tauriInvoke(command, args);
     } catch (error) {
       log.warn("window_resize_invoke_failed", {
         command,
@@ -817,7 +912,38 @@ export class AvatarRenderer {
       return null;
     }
 
-    return normalized.length > 80 ? `${normalized.slice(0, 80)}…` : normalized;
+    return normalized.length > 320 ? `${normalized.slice(0, 320)}…` : normalized;
+  }
+
+  private positionTooltipNearRobot(tooltip: HTMLElement, managed: ManagedRobot): void {
+    const margin = 8;
+    const anchorX = managed.wrapper.x;
+
+    const maxSpace = Math.max(120, Math.floor(anchorX - TOOLTIP_GAP - margin));
+    const effectiveBias = Math.min(TOOLTIP_LEFT_BIAS, Math.max(0, maxSpace - TOOLTIP_MAX_WIDTH));
+    const targetWidth = Math.max(120, Math.min(TOOLTIP_MAX_WIDTH, maxSpace - effectiveBias));
+    tooltip.style.width = `${targetWidth}px`;
+    tooltip.style.maxWidth = `${targetWidth}px`;
+
+    tooltip.style.left = "-9999px";
+    tooltip.style.top = "0px";
+    tooltip.style.display = "block";
+
+    const tooltipWidth = tooltip.offsetWidth;
+    const tooltipHeight = tooltip.offsetHeight;
+    const maxLeft = Math.max(margin, window.innerWidth - tooltipWidth - margin);
+    const maxTop = Math.max(margin, window.innerHeight - tooltipHeight - margin);
+
+    const anchorY = managed.wrapper.y + LAYOUT.robotSize / 2;
+
+    const preferredLeft = anchorX - tooltipWidth - TOOLTIP_GAP - effectiveBias;
+    const left = Math.min(maxLeft, Math.max(margin, preferredLeft));
+
+    const centeredTop = anchorY - tooltipHeight / 2;
+    const top = Math.min(maxTop, Math.max(margin, centeredTop));
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
   }
 
   private getDisplayName(managed: ManagedRobot): string {
