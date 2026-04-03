@@ -1,5 +1,7 @@
 import { WebSocket, WebSocketServer } from "ws";
 import type {
+  AppMessage,
+  CommandResult,
   PluginMessage,
   SessionInfo,
   SyncMessage,
@@ -7,6 +9,18 @@ import type {
 import { createLogger } from "./logger.js";
 
 const log = createLogger("ws-server");
+
+type CommandInput =
+  | AppMessage
+  | {
+    type: "command";
+    command: string;
+    sessionId: string;
+    requestId: string;
+    [key: string]: unknown;
+  };
+
+type MessageHandler = (message: CommandInput, reply: (result: CommandResult) => void) => void;
 
 export class AvatarWSServer {
   private wss: WebSocketServer | null = null;
@@ -17,6 +31,7 @@ export class AvatarWSServer {
   private syncData: SessionInfo[] = [];
   private readonly port: number;
   private actualPort = 0;
+  private messageHandler: MessageHandler | null = null;
 
   constructor(port = 2728) {
     this.port = port;
@@ -115,6 +130,54 @@ export class AvatarWSServer {
           this.clients.delete(ws);
           log.warn("ws_client_error", { error: error.message });
         });
+
+        ws.on("message", (data) => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(data.toString());
+          } catch (error) {
+            log.warn("ws_message_parse_failed", { error: error instanceof Error ? error.message : String(error) });
+            return;
+          }
+
+          if (!this.isCommandInput(parsed)) {
+            const type = parsed && typeof parsed === "object" && "type" in parsed
+              ? String((parsed as Record<string, unknown>).type)
+              : null;
+            log.warn("ws_message_ignored", { type });
+            return;
+          }
+
+          log.info("ws_message_received", {
+            command: parsed.command,
+            requestId: parsed.requestId,
+            sessionId: parsed.sessionId,
+          });
+
+          if (!this.messageHandler) {
+            log.warn("ws_message_handler_missing", {
+              command: parsed.command,
+              requestId: parsed.requestId,
+              sessionId: parsed.sessionId,
+            });
+            return;
+          }
+
+          this.messageHandler(parsed, (result) => {
+            if (ws.readyState !== WebSocket.OPEN) {
+              log.warn("ws_reply_socket_closed", {
+                requestId: result.requestId,
+              });
+              return;
+            }
+
+            ws.send(JSON.stringify(result));
+            log.info("ws_reply_sent", {
+              requestId: result.requestId,
+              success: result.success,
+            });
+          });
+        });
       });
     });
 
@@ -161,6 +224,10 @@ export class AvatarWSServer {
     this.syncData = sessions;
   }
 
+  setMessageHandler(handler: MessageHandler): void {
+    this.messageHandler = handler;
+  }
+
   broadcastSync(): void {
     const message: SyncMessage = {
       type: "sync",
@@ -180,5 +247,19 @@ export class AvatarWSServer {
         client.send(payload);
       }
     }
+  }
+
+  private isCommandInput(value: unknown): value is CommandInput {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+
+    const candidate = value as Record<string, unknown>;
+    return (
+      candidate.type === "command" &&
+      typeof candidate.command === "string" &&
+      typeof candidate.sessionId === "string" &&
+      typeof candidate.requestId === "string"
+    );
   }
 }

@@ -1,4 +1,6 @@
 import type {
+  AppMessage,
+  CommandResult,
   PluginMessage,
   SessionMessage,
   StateMessage,
@@ -12,6 +14,7 @@ export interface WSClientCallbacks {
   onSync: (msg: SyncMessage) => void;
   onState: (msg: StateMessage) => void;
   onSession: (msg: SessionMessage) => void;
+  onCommandResult: (msg: CommandResult) => void;
   onConnected: () => void;
   onDisconnected: () => void;
 }
@@ -57,6 +60,24 @@ export class AvatarWSClient {
       this.ws.close();
       this.ws = null;
     }
+  }
+
+  send(message: AppMessage): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      log.warn("ws_send_skipped_not_connected", {
+        command: message.command,
+        requestId: message.requestId,
+        sessionId: message.sessionId,
+      });
+      return;
+    }
+
+    this.ws.send(JSON.stringify(message));
+    log.info("ws_message_sent", {
+      command: message.command,
+      requestId: message.requestId,
+      sessionId: message.sessionId,
+    });
   }
 
   private attemptConnect(): void {
@@ -113,6 +134,9 @@ export class AvatarWSClient {
         case "session":
           this.callbacks.onSession(message);
           return;
+        case "command.result":
+          this.callbacks.onCommandResult(message);
+          return;
         default:
           log.warn("ws_unknown_message", { type: (message as Record<string, unknown>).type });
       }
@@ -149,7 +173,12 @@ export class AvatarWSClient {
         message &&
         typeof message === "object" &&
         "type" in message &&
-        (message.type === "sync" || message.type === "state" || message.type === "session")
+        (
+          message.type === "sync" ||
+          message.type === "state" ||
+          message.type === "session" ||
+          message.type === "command.result"
+        )
       ) {
         return message;
       }

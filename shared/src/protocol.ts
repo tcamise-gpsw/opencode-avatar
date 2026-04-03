@@ -38,6 +38,13 @@ export interface SessionInfo {
   /** Human-readable context. For display in a future hover tooltip. */
   label: string | null;
   tokens: TokenData;
+  /** Last assistant text snippet (tail, ~200 chars). */
+  lastResponse: string | null;
+  /** Pending permission request for this session, if any. */
+  pendingPermission: {
+    permissionId: string;
+    title: string;
+  } | null;
 }
 
 // --- WebSocket Messages: Plugin -> App ---
@@ -67,7 +74,37 @@ export interface SyncMessage {
   sessions: SessionInfo[];
 }
 
-export type PluginMessage = StateMessage | SessionMessage | SyncMessage;
+// --- WebSocket Messages: App -> Plugin ---
+
+export interface PromptCommand {
+  type: "command";
+  command: "prompt";
+  sessionId: string;
+  text: string;
+  requestId: string;
+}
+
+export interface PermissionReplyCommand {
+  type: "command";
+  command: "permission.reply";
+  sessionId: string;
+  permissionId: string;
+  allow: boolean;
+  requestId: string;
+}
+
+export type AppMessage = PromptCommand | PermissionReplyCommand;
+
+// --- WebSocket Messages: Plugin -> App ---
+
+export interface CommandResult {
+  type: "command.result";
+  requestId: string;
+  success: boolean;
+  error?: string;
+}
+
+export type PluginMessage = StateMessage | SessionMessage | SyncMessage | CommandResult;
 
 // --- Tool-to-state mapping ---
 

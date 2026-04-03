@@ -170,6 +170,8 @@ export class SessionStateMachine {
       state: this.getState(),
       label: this.getLabel(),
       tokens: this.tokenData,
+      lastResponse: null,
+      pendingPermission: null,
     };
   }
 

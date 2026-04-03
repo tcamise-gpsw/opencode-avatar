@@ -59,4 +59,65 @@ describe("SessionRegistry", () => {
     });
     expect(registry.getSnapshotByGroupId("parent", 0)?.name).toBe("Child Task");
   });
+
+  it("initializes lastResponse and pendingPermission as null", () => {
+    const registry = new SessionRegistry();
+    const created = registry.ensureSession("s1", { name: "Session 1" });
+
+    expect(created.member.lastResponse).toBeNull();
+    expect(created.member.pendingPermission).toBeNull();
+
+    const snapshot = registry.getSnapshotByGroupId("s1", 0);
+    expect(snapshot?.lastResponse).toBeNull();
+    expect(snapshot?.pendingPermission).toBeNull();
+  });
+
+  it("exposes lastResponse and pendingPermission from the primary member snapshot", () => {
+    const registry = new SessionRegistry();
+    const parent = registry.ensureSession("parent", { name: "Parent Task" });
+    const child = registry.ensureSession("child", {
+      name: "Child Task",
+      parentId: "parent",
+    });
+
+    parent.member.sm.onMessageDelta();
+    parent.member.lastResponse = "Parent response text";
+    parent.member.pendingPermission = {
+      permissionId: "perm-parent",
+      title: "Allow parent action",
+    };
+
+    child.member.sm.onPermissionAsked("Needs permission");
+    child.member.lastResponse = "Child response text";
+    child.member.pendingPermission = {
+      permissionId: "perm-child",
+      title: "Allow child action",
+    };
+
+    const snapshot = registry.getSnapshotByGroupId("parent", 0);
+    expect(snapshot?.state).toBe("waiting");
+    expect(snapshot?.lastResponse).toBe("Child response text");
+    expect(snapshot?.pendingPermission).toEqual({
+      permissionId: "perm-child",
+      title: "Allow child action",
+    });
+  });
+
+  it("includes updated lastResponse and pendingPermission in grouped snapshots", () => {
+    const registry = new SessionRegistry();
+    const created = registry.ensureSession("group-1", { name: "Group One" });
+
+    created.member.lastResponse = "Tail text";
+    created.member.pendingPermission = {
+      permissionId: "perm-1",
+      title: "Approve file write",
+    };
+
+    const snapshot = registry.getSnapshotByGroupId("group-1", 0);
+    expect(snapshot?.lastResponse).toBe("Tail text");
+    expect(snapshot?.pendingPermission).toEqual({
+      permissionId: "perm-1",
+      title: "Approve file write",
+    });
+  });
 });
