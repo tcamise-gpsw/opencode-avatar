@@ -75,6 +75,8 @@ The shared protocol exists so the plugin and app can evolve independently while 
 
 The protocol also centralizes tool-to-avatar-state mapping. Today that includes reading tools, editing tools, `Bash`, several Playwright browser actions, and `Task`.
 
+Tool mapping is applied case-insensitively in the plugin state machine. Incoming tool names are normalized (for example `read`/`Read`) before state resolution and before matching start/end lifecycle events.
+
 ## Plugin Responsibilities
 
 The plugin is the source of truth for avatar behavior. In multi-process setups, each plugin process owns its local session state while the WebSocket-owning process serves the merged cross-process view.
@@ -88,6 +90,8 @@ The plugin is the source of truth for avatar behavior. In multi-process setups, 
 - permission waiting
 - temporary error display
 - short hold windows to avoid flicker when tools finish
+
+`SessionStateMachine` also exposes diagnostics used by logging, including active tool count/names and state flags (`isThinking`, waiting, error).
 
 Priority is defined in `shared/src/protocol.ts`, with `error` highest and `idle` lowest.
 
@@ -161,10 +165,13 @@ The app renders state; it does not derive state.
 ## Logging Behavior
 
 - Plugin logs are persisted under `~/.opencode-avatar/logs/` and currently write to `plugin.log`.
+- Plugin logs include info-level `session_state_summary` entries on major state transitions (session lifecycle, permission prompts, tool before/after, and errors) to aid production diagnosis without enabling debug-level logs.
 - Plugin shared session snapshots are persisted under `~/.opencode-avatar/state/`.
 - Plugin cross-process command routing also persists `cmd-*.json` and `result-*.json` in `~/.opencode-avatar/state/`.
 - The frontend logger in `app/src/logger.ts` is console-based today; it does not write browser logs to files.
 - The Tauri shell enables `tauri-plugin-log` in debug builds, but this repo does not currently add explicit file-target configuration for app-side logs.
+
+See `docs/troubleshooting.md` for an operational triage flow and log interpretation guide.
 
 ## Development Commands
 

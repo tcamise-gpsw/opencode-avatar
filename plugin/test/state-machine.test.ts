@@ -25,6 +25,12 @@ describe("SessionStateMachine", () => {
       expect(sm.getLabel()).toBe("Reading main.ts");
     });
 
+    it("transitions to reading on lowercase read tool start", () => {
+      sm.onToolStart("read", { path: "main.ts" });
+      expect(sm.getState()).toBe("reading");
+      expect(sm.getLabel()).toBe("Reading main.ts");
+    });
+
     it("transitions to editing on Edit tool start", () => {
       sm.onToolStart("Edit", { filePath: "main.ts" });
       expect(sm.getState()).toBe("editing");
@@ -39,6 +45,12 @@ describe("SessionStateMachine", () => {
 
     it("transitions to running on Bash tool start", () => {
       sm.onToolStart("Bash", { command: "npm test" });
+      expect(sm.getState()).toBe("running");
+      expect(sm.getLabel()).toBe("Running npm test");
+    });
+
+    it("transitions to running on lowercase bash tool start", () => {
+      sm.onToolStart("bash", { command: "npm test" });
       expect(sm.getState()).toBe("running");
       expect(sm.getLabel()).toBe("Running npm test");
     });
@@ -66,6 +78,14 @@ describe("SessionStateMachine", () => {
       sm.onToolStart("Read", { path: "file.ts" });
       expect(sm.getState()).toBe("reading");
       sm.onToolEnd("Read");
+      sm.tick(600);
+      expect(sm.getState()).toBe("idle");
+    });
+
+    it("matches tool end even when tool name case differs", () => {
+      sm.onToolStart("bash", { command: "npm test" });
+      expect(sm.getState()).toBe("running");
+      sm.onToolEnd("Bash");
       sm.tick(600);
       expect(sm.getState()).toBe("idle");
     });
@@ -171,6 +191,22 @@ describe("SessionStateMachine", () => {
         tokens: { total: 0, rate: 0 },
         lastResponse: null,
         pendingPermission: null,
+      });
+    });
+  });
+
+  describe("diagnostics", () => {
+    it("returns active tool count and names", () => {
+      sm.onToolStart("read", { path: "a.ts" });
+      sm.onToolStart("grep", { pattern: "TODO" });
+      sm.onMessageDelta();
+
+      expect(sm.getDiagnostics()).toEqual({
+        activeToolCount: 2,
+        activeTools: ["read", "grep"],
+        hasError: false,
+        hasWaiting: false,
+        isThinking: true,
       });
     });
   });

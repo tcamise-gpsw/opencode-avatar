@@ -8,7 +8,7 @@ import type {
 import { randomUUID } from "crypto";
 import { createLogger } from "./logger.js";
 import { handleCommand } from "./command-handler.js";
-import { SessionRegistry } from "./session-registry.js";
+import { SessionRegistry, type SessionMemberRuntime } from "./session-registry.js";
 import { SharedSessionStore } from "./shared-session-store.js";
 import { SessionStateMachine } from "./state-machine.js";
 import { TokenTracker } from "./token-tracker.js";
@@ -393,6 +393,28 @@ function broadcastState(sessionId: string, now = Date.now()): void {
   refreshSyncData(now);
 }
 
+function logSessionStateSummary(reason: string, groupId: string, member: SessionMemberRuntime, now = Date.now()): void {
+  const snapshot = registry.getSnapshotByGroupId(groupId, now);
+  if (!snapshot) {
+    return;
+  }
+
+  const diagnostics = member.sm.getDiagnostics();
+  log.info("session_state_summary", {
+    reason,
+    sessionId: member.sessionId,
+    groupId,
+    state: snapshot.state,
+    label: snapshot.label,
+    tokenRate: snapshot.tokens.rate,
+    activeToolCount: diagnostics.activeToolCount,
+    activeTools: diagnostics.activeTools,
+    isThinking: diagnostics.isThinking,
+    hasWaiting: diagnostics.hasWaiting,
+    hasError: diagnostics.hasError,
+  });
+}
+
 function normalizeArgs(value: unknown): Record<string, unknown> {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -483,12 +505,14 @@ function handleEvent(event: SDKEvent): void {
       } else {
         member.sm.onMessageComplete();
       }
+      logSessionStateSummary(`session.status:${event.properties.status.type}`, groupId, member);
       broadcastState(groupId);
       return;
     }
     case "session.idle": {
       const { member, groupId } = getOrCreateSession(event.properties.sessionID);
       member.sm.onMessageComplete();
+      logSessionStateSummary("session.idle", groupId, member);
       broadcastState(groupId);
       return;
     }
@@ -501,6 +525,7 @@ function handleEvent(event: SDKEvent): void {
 
       const { member, groupId } = getOrCreateSession(sessionId);
       member.sm.onError(getSessionErrorMessage(event));
+      logSessionStateSummary("session.error", groupId, member);
       broadcastState(groupId);
       return;
     }
@@ -513,6 +538,7 @@ function handleEvent(event: SDKEvent): void {
         response: event.properties.response,
         sessionId: event.properties.sessionID,
       });
+      logSessionStateSummary("permission.replied", groupId, member);
       broadcastState(groupId);
       return;
     }
@@ -583,18 +609,21 @@ function handlePermissionAsk(input: PermissionAskInput): void {
     sessionId: input.sessionID,
     title: label,
   });
+  logSessionStateSummary("permission.ask", groupId, member);
   broadcastState(groupId);
 }
 
 function handleToolBefore(input: ToolBeforeInput, output: ToolBeforeOutput): void {
   const { member, groupId } = getOrCreateSession(input.sessionID);
   member.sm.onToolStart(input.tool, normalizeArgs(output.args));
+  logSessionStateSummary(`tool.before:${input.tool}`, groupId, member);
   broadcastState(groupId);
 }
 
 function handleToolAfter(input: ToolAfterInput): void {
   const { member, groupId } = getOrCreateSession(input.sessionID);
   member.sm.onToolEnd(input.tool);
+  logSessionStateSummary(`tool.after:${input.tool}`, groupId, member);
   broadcastState(groupId);
 }
 
