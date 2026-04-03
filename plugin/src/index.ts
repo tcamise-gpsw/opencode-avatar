@@ -4,6 +4,7 @@ import type {
   StateMessage,
 } from "@opencode-avatar/shared";
 import { createLogger } from "./logger.js";
+import { SessionRegistry } from "./session-registry.js";
 import { SessionStateMachine } from "./state-machine.js";
 import { TokenTracker } from "./token-tracker.js";
 import { AvatarWSServer } from "./ws-server.js";
@@ -17,19 +18,13 @@ type ToolBeforeInput = Parameters<NonNullable<Hooks["tool.execute.before"]>>[0];
 type ToolBeforeOutput = Parameters<NonNullable<Hooks["tool.execute.before"]>>[1];
 type ToolAfterInput = Parameters<NonNullable<Hooks["tool.execute.after"]>>[0];
 
-interface SessionRuntime {
-  sm: SessionStateMachine;
-  tokens: TokenTracker;
-  assistantMessageTotals: Map<string, number>;
-}
-
 const DEFAULT_WS_PORT = 2728;
 const TICK_INTERVAL_MS = 250;
 
 const log = createLogger("plugin");
 const port = getPortFromEnv(process.env.AVATAR_WS_PORT);
 const wsServer = new AvatarWSServer(port);
-const sessions = new Map<string, SessionRuntime>();
+const registry = new SessionRegistry();
 
 let serverStartPromise: Promise<void> | null = null;
 let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -58,20 +53,8 @@ function ensureServerStarted(): void {
     tickTimer = setInterval(() => {
       const now = Date.now();
 
-      for (const [sessionId, session] of sessions) {
-        const before = session.sm.snapshot();
-        session.sm.advanceTime(now);
-        session.sm.setTokens(session.tokens.getData(now));
-        const after = session.sm.snapshot();
-
-        if (
-          before.state !== after.state ||
-          before.label !== after.label ||
-          before.tokens.total !== after.tokens.total ||
-          before.tokens.rate !== after.tokens.rate
-        ) {
-          broadcastState(sessionId);
-        }
+      for (const snapshot of registry.getSnapshots(now)) {
+        broadcastState(snapshot.sessionId, now);
       }
 
       refreshSyncData(now);
@@ -80,72 +63,86 @@ function ensureServerStarted(): void {
 }
 
 function refreshSyncData(now = Date.now()): void {
-  const snapshots = Array.from(sessions.values(), (session) => {
-    session.sm.advanceTime(now);
-    session.sm.setTokens(session.tokens.getData(now));
-    return session.sm.snapshot();
-  });
-
-  wsServer.setSyncData(snapshots);
+  wsServer.setSyncData(registry.getSnapshots(now));
 }
 
-function getOrCreateSession(sessionId: string, name?: string): {
-  session: SessionRuntime;
-  created: boolean;
+function getOrCreateSession(
+  sessionId: string,
+  options: {
+    name?: string;
+    parentId?: string;
+  } = {},
+): {
+  member: ReturnType<SessionRegistry["getSession"]> extends infer T ? Exclude<T, null> : never;
+  groupId: string;
+  groupCreated: boolean;
 } {
-  let session = sessions.get(sessionId);
-  let created = false;
+  const result = registry.ensureSession(sessionId, options);
 
-  if (!session) {
-    session = {
-      sm: new SessionStateMachine(sessionId),
-      tokens: new TokenTracker(),
-      assistantMessageTotals: new Map(),
+  if (result.memberCreated) {
+    log.info("session_created", {
+      sessionId,
+      name: options.name ?? "",
+      parentId: options.parentId ?? null,
+      groupId: result.groupId,
+    });
+  }
+
+  if (result.removedGroup) {
+    const message: SessionMessage = {
+      type: "session",
+      sessionId: result.removedGroup.groupId,
+      action: "ended",
+      name: result.removedGroup.name,
+      timestamp: Date.now(),
     };
-    sessions.set(sessionId, session);
-    created = true;
-    log.info("session_created", { sessionId, name: name ?? "" });
+
+    wsServer.broadcast(message);
   }
 
-  if (name) {
-    session.sm.setName(name);
-  }
-
-  session.sm.advanceTime(Date.now());
-  session.sm.setTokens(session.tokens.getData(Date.now()));
   refreshSyncData();
 
-  return { session, created };
+  return {
+    member: result.member,
+    groupId: result.groupId,
+    groupCreated: result.groupCreated,
+  };
 }
 
-function removeSession(sessionId: string, name: string): void {
-  if (!sessions.delete(sessionId)) {
+function removeSession(sessionId: string): void {
+  const result = registry.removeSession(sessionId);
+  if (!result) {
     return;
   }
 
-  const message: SessionMessage = {
-    type: "session",
-    sessionId,
-    action: "ended",
-    name,
-    timestamp: Date.now(),
-  };
+  if (result.groupRemoved) {
+    const message: SessionMessage = {
+      type: "session",
+      sessionId: result.groupId,
+      action: "ended",
+      name: result.name,
+      timestamp: Date.now(),
+    };
 
-  wsServer.broadcast(message);
+    wsServer.broadcast(message);
+  } else {
+    broadcastSession(result.groupId, "resumed");
+    broadcastState(result.groupId);
+  }
+
   refreshSyncData();
-  log.info("session_removed", { sessionId, name });
+  log.info("session_removed", { sessionId, groupId: result.groupId, name: result.name });
 }
 
 function broadcastSession(sessionId: string, action: SessionMessage["action"]): void {
-  const session = sessions.get(sessionId);
-  if (!session) {
+  const snapshot = registry.getSnapshotBySessionId(sessionId, Date.now());
+  if (!snapshot) {
     return;
   }
 
-  const snapshot = session.sm.snapshot();
   const message: SessionMessage = {
     type: "session",
-    sessionId,
+    sessionId: snapshot.sessionId,
     action,
     name: snapshot.name,
     timestamp: Date.now(),
@@ -155,20 +152,15 @@ function broadcastSession(sessionId: string, action: SessionMessage["action"]): 
   refreshSyncData();
 }
 
-function broadcastState(sessionId: string): void {
-  const session = sessions.get(sessionId);
-  if (!session) {
+function broadcastState(sessionId: string, now = Date.now()): void {
+  const snapshot = registry.getSnapshotBySessionId(sessionId, now);
+  if (!snapshot) {
     return;
   }
 
-  const now = Date.now();
-  session.sm.advanceTime(now);
-  session.sm.setTokens(session.tokens.getData(now));
-  const snapshot = session.sm.snapshot();
-
   const message: StateMessage = {
     type: "state",
-    sessionId,
+    sessionId: snapshot.sessionId,
     state: snapshot.state,
     label: snapshot.label,
     tokens: snapshot.tokens,
@@ -241,35 +233,41 @@ function getAssistantTokenTotal(event: Extract<SDKEvent, { type: "message.update
 function handleEvent(event: SDKEvent): void {
   switch (event.type) {
     case "session.created": {
-      const { created } = getOrCreateSession(event.properties.info.id, event.properties.info.title);
-      broadcastSession(event.properties.info.id, created ? "created" : "resumed");
-      broadcastState(event.properties.info.id);
+      const { groupId, groupCreated } = getOrCreateSession(event.properties.info.id, {
+        name: event.properties.info.title,
+        parentId: event.properties.info.parentID,
+      });
+      broadcastSession(groupId, groupCreated ? "created" : "resumed");
+      broadcastState(groupId);
       return;
     }
     case "session.updated": {
-      const { created } = getOrCreateSession(event.properties.info.id, event.properties.info.title);
-      broadcastSession(event.properties.info.id, created ? "created" : "resumed");
-      broadcastState(event.properties.info.id);
+      const { groupId, groupCreated } = getOrCreateSession(event.properties.info.id, {
+        name: event.properties.info.title,
+        parentId: event.properties.info.parentID,
+      });
+      broadcastSession(groupId, groupCreated ? "created" : "resumed");
+      broadcastState(groupId);
       return;
     }
     case "session.deleted": {
-      removeSession(event.properties.info.id, event.properties.info.title);
+      removeSession(event.properties.info.id);
       return;
     }
     case "session.status": {
-      const { session } = getOrCreateSession(event.properties.sessionID);
+      const { member, groupId } = getOrCreateSession(event.properties.sessionID);
       if (event.properties.status.type === "busy") {
-        session.sm.onMessageDelta();
+        member.sm.onMessageDelta();
       } else {
-        session.sm.onMessageComplete();
+        member.sm.onMessageComplete();
       }
-      broadcastState(event.properties.sessionID);
+      broadcastState(groupId);
       return;
     }
     case "session.idle": {
-      const { session } = getOrCreateSession(event.properties.sessionID);
-      session.sm.onMessageComplete();
-      broadcastState(event.properties.sessionID);
+      const { member, groupId } = getOrCreateSession(event.properties.sessionID);
+      member.sm.onMessageComplete();
+      broadcastState(groupId);
       return;
     }
     case "session.error": {
@@ -279,15 +277,15 @@ function handleEvent(event: SDKEvent): void {
         return;
       }
 
-      const { session } = getOrCreateSession(sessionId);
-      session.sm.onError(getSessionErrorMessage(event));
-      broadcastState(sessionId);
+      const { member, groupId } = getOrCreateSession(sessionId);
+      member.sm.onError(getSessionErrorMessage(event));
+      broadcastState(groupId);
       return;
     }
     case "permission.replied": {
-      const { session } = getOrCreateSession(event.properties.sessionID);
-      session.sm.onPermissionReplied();
-      broadcastState(event.properties.sessionID);
+      const { member, groupId } = getOrCreateSession(event.properties.sessionID);
+      member.sm.onPermissionReplied();
+      broadcastState(groupId);
       return;
     }
     case "message.updated": {
@@ -296,26 +294,26 @@ function handleEvent(event: SDKEvent): void {
         return;
       }
 
-      const { session } = getOrCreateSession(info.sessionID);
+      const { member, groupId } = getOrCreateSession(info.sessionID);
       const total = getAssistantTokenTotal(event);
       if (total !== null) {
-        const previous = session.assistantMessageTotals.get(info.id) ?? 0;
+        const previous = member.assistantMessageTotals.get(info.id) ?? 0;
         const delta = total - previous;
 
         // message.updated is cumulative per assistant message, so only add the delta.
         if (delta > 0) {
-          session.tokens.add(delta, Date.now());
-          session.assistantMessageTotals.set(info.id, total);
+          member.tokens.add(delta, Date.now());
+          member.assistantMessageTotals.set(info.id, total);
         }
       }
 
       if (info.time.completed || info.error || info.finish) {
-        session.sm.onMessageComplete();
+        member.sm.onMessageComplete();
       } else {
-        session.sm.onMessageDelta();
+        member.sm.onMessageDelta();
       }
 
-      broadcastState(info.sessionID);
+      broadcastState(groupId);
       return;
     }
     default:
@@ -324,27 +322,27 @@ function handleEvent(event: SDKEvent): void {
 }
 
 function handleChatMessage(input: ChatMessageInput, _output: ChatMessageOutput): void {
-  const { session } = getOrCreateSession(input.sessionID);
-  session.sm.onMessageDelta();
-  broadcastState(input.sessionID);
+  const { member, groupId } = getOrCreateSession(input.sessionID);
+  member.sm.onMessageDelta();
+  broadcastState(groupId);
 }
 
 function handlePermissionAsk(input: PermissionAskInput): void {
-  const { session } = getOrCreateSession(input.sessionID);
-  session.sm.onPermissionAsked(getPermissionLabel(input));
-  broadcastState(input.sessionID);
+  const { member, groupId } = getOrCreateSession(input.sessionID);
+  member.sm.onPermissionAsked(getPermissionLabel(input));
+  broadcastState(groupId);
 }
 
 function handleToolBefore(input: ToolBeforeInput, output: ToolBeforeOutput): void {
-  const { session } = getOrCreateSession(input.sessionID);
-  session.sm.onToolStart(input.tool, normalizeArgs(output.args));
-  broadcastState(input.sessionID);
+  const { member, groupId } = getOrCreateSession(input.sessionID);
+  member.sm.onToolStart(input.tool, normalizeArgs(output.args));
+  broadcastState(groupId);
 }
 
 function handleToolAfter(input: ToolAfterInput): void {
-  const { session } = getOrCreateSession(input.sessionID);
-  session.sm.onToolEnd(input.tool);
-  broadcastState(input.sessionID);
+  const { member, groupId } = getOrCreateSession(input.sessionID);
+  member.sm.onToolEnd(input.tool);
+  broadcastState(groupId);
 }
 
 export const server: Plugin = async () => {
