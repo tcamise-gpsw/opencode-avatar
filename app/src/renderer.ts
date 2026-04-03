@@ -64,6 +64,7 @@ export type AvatarRendererInitOptions = {
 export class AvatarRenderer {
   onPrompt?: (sessionId: string, text: string) => void;
   onPermissionReply?: (sessionId: string, permissionId: string, allow: boolean) => void;
+  onCloseRobot?: (sessionId: string) => void;
 
   private app: Application | null = null;
   private robotLayer: Container | null = null;
@@ -86,6 +87,7 @@ export class AvatarRenderer {
   private contextMenuElement: HTMLElement | null = null;
   private contextMenuTitleElement: HTMLElement | null = null;
   private contextMenuToggleSizeButtonElement: HTMLButtonElement | null = null;
+  private contextMenuCloseRobotButtonElement: HTMLButtonElement | null = null;
   private permissionPopupElement: HTMLElement | null = null;
   private permissionTitleElement: HTMLElement | null = null;
   private permissionAllowButtonElement: HTMLButtonElement | null = null;
@@ -145,6 +147,7 @@ export class AvatarRenderer {
       this.contextMenuElement = document.getElementById("robot-context-menu");
       this.contextMenuTitleElement = document.getElementById("context-menu-title");
       this.contextMenuToggleSizeButtonElement = document.getElementById("context-menu-toggle-size") as HTMLButtonElement | null;
+      this.contextMenuCloseRobotButtonElement = document.getElementById("context-menu-close-robot") as HTMLButtonElement | null;
       this.permissionPopupElement = document.getElementById("permission-popup");
       this.permissionTitleElement = document.getElementById("permission-title");
       this.permissionAllowButtonElement = document.getElementById("permission-allow") as HTMLButtonElement | null;
@@ -166,6 +169,15 @@ export class AvatarRenderer {
         }
 
         this.toggleMaximizedSession(sessionId);
+      });
+      this.contextMenuCloseRobotButtonElement?.addEventListener("click", () => {
+        const sessionId = this.activeContextMenuSessionId;
+        if (!sessionId) {
+          return;
+        }
+
+        this.hideContextMenu();
+        this.onCloseRobot?.(sessionId);
       });
       this.promptInputElement?.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
@@ -390,6 +402,7 @@ export class AvatarRenderer {
     this.contextMenuElement = null;
     this.contextMenuTitleElement = null;
     this.contextMenuToggleSizeButtonElement = null;
+    this.contextMenuCloseRobotButtonElement = null;
     this.permissionPopupElement = null;
     this.permissionTitleElement = null;
     this.permissionAllowButtonElement = null;

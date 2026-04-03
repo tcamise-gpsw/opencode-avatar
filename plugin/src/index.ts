@@ -61,12 +61,54 @@ function makeCommandFailureResult(requestId: string, error: string): CommandResu
   };
 }
 
+function makeCommandSuccessResult(requestId: string): CommandResult {
+  return {
+    type: "command.result",
+    requestId,
+    success: true,
+  };
+}
+
+function closeRobot(sessionId: string, now = Date.now()): void {
+  const groupId = registry.getGroupIdForSession(sessionId) ?? sessionId;
+  const removedGroup = registry.removeGroup(groupId);
+  const removedSharedSnapshot = sharedSessionStore.removeSession(groupId, now);
+
+  refreshSyncData(now);
+  log.info("robot_closed", {
+    sessionId,
+    groupId,
+    removedLocalGroup: removedGroup !== null,
+    removedSharedSnapshot,
+  });
+}
+
 function routeIncomingCommand(
   message: Parameters<Parameters<typeof wsServer.setMessageHandler>[0]>[0],
   reply: (result: CommandResult) => void,
 ): void {
   const now = Date.now();
-  const isLocalSession = registry.getGroupIdForSession(message.sessionId) !== null;
+  const localGroupId = registry.getGroupIdForSession(message.sessionId);
+  const isLocalSession = localGroupId !== null;
+  const targetSessionId = localGroupId ?? message.sessionId;
+  const existsInMergedSync = sharedSyncCache.some((session) => session.sessionId === targetSessionId);
+
+  if (message.command === "robot.close") {
+    if (!isLocalSession && !existsInMergedSync) {
+      const result = makeCommandFailureResult(message.requestId, "session not found");
+      log.warn("command_route_session_not_found", {
+        command: message.command,
+        requestId: message.requestId,
+        sessionId: message.sessionId,
+      });
+      reply(result);
+      return;
+    }
+
+    closeRobot(targetSessionId, now);
+    reply(makeCommandSuccessResult(message.requestId));
+    return;
+  }
 
   log.info("command_routed", {
     command: message.command,
@@ -82,7 +124,6 @@ function routeIncomingCommand(
     return;
   }
 
-  const existsInMergedSync = sharedSyncCache.some((session) => session.sessionId === message.sessionId);
   if (!existsInMergedSync) {
     const result = makeCommandFailureResult(message.requestId, "session not found");
     log.warn("command_route_session_not_found", {

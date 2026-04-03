@@ -118,6 +118,15 @@ async function bootstrap(): Promise<void> {
     });
   };
 
+  renderer.onCloseRobot = (sessionId) => {
+    wsClient.send({
+      type: "command",
+      command: "robot.close",
+      sessionId,
+      requestId: crypto.randomUUID(),
+    });
+  };
+
   const cleanup = () => {
     if (cleanedUp) {
       return;

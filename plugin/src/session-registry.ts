@@ -45,6 +45,12 @@ export type RemoveSessionResult = {
   name: string;
 };
 
+export type RemoveGroupResult = {
+  groupId: string;
+  name: string;
+  sessionIds: string[];
+};
+
 export class SessionRegistry {
   private readonly sessions = new Map<string, SessionMeta>();
   private readonly groups = new Map<string, SessionGroup>();
@@ -141,6 +147,25 @@ export class SessionRegistry {
       groupId,
       groupRemoved: false,
       name: this.groups.get(groupId)?.name ?? "",
+    };
+  }
+
+  removeGroup(groupId: string): RemoveGroupResult | null {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      return null;
+    }
+
+    const sessionIds = Array.from(group.members.keys());
+    for (const sessionId of sessionIds) {
+      this.sessions.delete(sessionId);
+    }
+
+    this.groups.delete(groupId);
+    return {
+      groupId,
+      name: group.name,
+      sessionIds,
     };
   }
 

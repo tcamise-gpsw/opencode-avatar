@@ -83,6 +83,58 @@ export class SharedSessionStore {
     }
   }
 
+  removeSession(sessionId: string, now: number = Date.now()): boolean {
+    try {
+      this.ensureDirectory();
+
+      let removed = false;
+      for (const fileName of readdirSync(this.directory)) {
+        if (
+          !fileName.endsWith(".json") ||
+          fileName.startsWith(COMMAND_FILE_PREFIX) ||
+          fileName.startsWith(RESULT_FILE_PREFIX)
+        ) {
+          continue;
+        }
+
+        const filePath = join(this.directory, fileName);
+        const state = this.readStateFile(filePath);
+        if (!state) {
+          continue;
+        }
+
+        const sessions = state.sessions.filter((session) => session.sessionId !== sessionId);
+        if (sessions.length === state.sessions.length) {
+          continue;
+        }
+
+        removed = true;
+
+        if (sessions.length === 0) {
+          this.safeRemove(filePath, "shared_snapshot_removed_empty");
+          continue;
+        }
+
+        const payload: PersistedInstanceState = {
+          instanceId: state.instanceId,
+          updatedAt: now,
+          sessions,
+        };
+        const tempPath = `${filePath}.tmp`;
+        writeFileSync(tempPath, JSON.stringify(payload));
+        renameSync(tempPath, filePath);
+      }
+
+      return removed;
+    } catch (error) {
+      log.error("shared_snapshot_session_remove_failed", {
+        error: this.getUnknownErrorMessage(error),
+        sessionId,
+      });
+      return false;
+    }
+  }
+
   readMerged(localSessions: SessionInfo[], now: number = Date.now()): SessionInfo[] {
     try {
       this.ensureDirectory();
