@@ -146,6 +146,10 @@ export class Robot {
   }
 
   private getBodyFrameCount(bodyAnim: string): number {
+    if (bodyAnim === "idle") {
+      return 1;
+    }
+
     const textureName = BODY_ANIMATION_TEXTURES[bodyAnim] ?? "idle";
 
     let count = 0;
