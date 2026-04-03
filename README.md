@@ -119,6 +119,7 @@ The current automated tests live in `plugin/test/` and cover the state machine, 
 | --- | --- | --- |
 | `AVATAR_WS_PORT` | `2728` | Port used by the plugin WebSocket server. |
 | `AVATAR_LOG_LEVEL` | `info` | Plugin log verbosity: `debug`, `info`, `warn`, or `error`. |
+| `AVATAR_LOG_STDERR` | unset | When set to `1`, mirrors plugin logs to stderr in addition to `~/.opencode-avatar/logs/plugin.log`. |
 
 ### App
 

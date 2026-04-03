@@ -35,8 +35,9 @@ async function bootstrap(): Promise<void> {
 
   const wsUrl = resolveWsUrl();
   const renderer = new AvatarRenderer();
+  const tooltip = document.getElementById("robot-tooltip");
 
-  await renderer.init({ canvas: resolveMount(root) });
+  await renderer.init({ canvas: resolveMount(root), mount: root, tooltip });
 
   renderer.canvas.style.display = "block";
   renderer.canvas.style.width = "100vw";

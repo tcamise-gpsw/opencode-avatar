@@ -25,6 +25,10 @@ function getCurrentLevel(): LogLevel {
 
 let currentLevel: LogLevel = getCurrentLevel();
 
+function shouldMirrorToStderr(): boolean {
+  return process.env.AVATAR_LOG_STDERR === "1";
+}
+
 function ensureLogDir(): void {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
@@ -95,7 +99,9 @@ export function createLogger(component: string) {
     }
 
     const formatted = formatMessage(level, component, message, data);
-    console.error(formatted);
+    if (shouldMirrorToStderr()) {
+      console.error(formatted);
+    }
     writeLog(formatted);
   }
 
