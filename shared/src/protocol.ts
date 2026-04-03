@@ -93,7 +93,14 @@ export interface PermissionReplyCommand {
   requestId: string;
 }
 
-export type AppMessage = PromptCommand | PermissionReplyCommand;
+export interface CloseRobotCommand {
+  type: "command";
+  command: "robot.close";
+  sessionId: string;
+  requestId: string;
+}
+
+export type AppMessage = PromptCommand | PermissionReplyCommand | CloseRobotCommand;
 
 // --- WebSocket Messages: Plugin -> App ---
 

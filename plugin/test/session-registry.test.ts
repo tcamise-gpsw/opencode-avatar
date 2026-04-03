@@ -120,4 +120,23 @@ describe("SessionRegistry", () => {
       title: "Approve file write",
     });
   });
+
+  it("removes an entire grouped robot snapshot on explicit close", () => {
+    const registry = new SessionRegistry();
+
+    registry.ensureSession("parent", { name: "Parent Task" });
+    registry.ensureSession("child", {
+      name: "Child Task",
+      parentId: "parent",
+    });
+
+    const removed = registry.removeGroup("parent");
+
+    expect(removed?.groupId).toBe("parent");
+    expect(removed?.name).toBe("Parent Task");
+    expect(removed?.sessionIds).toEqual(["parent", "child"]);
+    expect(registry.getSession("parent")).toBeNull();
+    expect(registry.getSession("child")).toBeNull();
+    expect(registry.getSnapshotByGroupId("parent", 0)).toBeNull();
+  });
 });

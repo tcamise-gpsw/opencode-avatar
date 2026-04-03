@@ -96,6 +96,34 @@ describe("SharedSessionStore", () => {
     ]);
   });
 
+  it("removes a session from persisted snapshots", () => {
+    const directory = createTempDirectory();
+    const localStore = new SharedSessionStore("instance-a", directory);
+    const remoteStore = new SharedSessionStore("instance-b", directory);
+
+    remoteStore.write([
+      createSession("session-b", { name: "Window B" }),
+      createSession("session-c", { name: "Window C" }),
+    ], 1_000);
+
+    expect(localStore.removeSession("session-b", 1_100)).toBe(true);
+    expect(localStore.readMerged([], 1_100)).toEqual([
+      createSession("session-c", { name: "Window C" }),
+    ]);
+  });
+
+  it("deletes an empty snapshot file after removing its last session", () => {
+    const directory = createTempDirectory();
+    const localStore = new SharedSessionStore("instance-a", directory);
+    const remoteStore = new SharedSessionStore("instance-b", directory);
+    const remotePath = join(directory, "instance-b.json");
+
+    remoteStore.write([createSession("session-b", { name: "Window B" })], 1_000);
+
+    expect(localStore.removeSession("session-b", 1_100)).toBe(true);
+    expect(existsSync(remotePath)).toBe(false);
+  });
+
   it("writes command files using cmd-{requestId}.json", () => {
     const directory = createTempDirectory();
     const store = new SharedSessionStore("instance-a", directory);
