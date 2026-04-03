@@ -1,10 +1,13 @@
 import type { Hooks, Plugin, PluginModule } from "@opencode-ai/plugin";
 import type {
   SessionMessage,
+  SessionInfo,
   StateMessage,
 } from "@opencode-avatar/shared";
+import { randomUUID } from "crypto";
 import { createLogger } from "./logger.js";
 import { SessionRegistry } from "./session-registry.js";
+import { SharedSessionStore } from "./shared-session-store.js";
 import { SessionStateMachine } from "./state-machine.js";
 import { TokenTracker } from "./token-tracker.js";
 import { AvatarWSServer } from "./ws-server.js";
@@ -25,9 +28,12 @@ const log = createLogger("plugin");
 const port = getPortFromEnv(process.env.AVATAR_WS_PORT);
 const wsServer = new AvatarWSServer(port);
 const registry = new SessionRegistry();
+const instanceId = process.env.AVATAR_INSTANCE_ID?.trim() || randomUUID();
+const sharedSessionStore = new SharedSessionStore(instanceId);
 
 let serverStartPromise: Promise<void> | null = null;
 let tickTimer: ReturnType<typeof setInterval> | null = null;
+let sharedSyncCache: SessionInfo[] = [];
 
 function getPortFromEnv(value: string | undefined): number {
   if (!value) {
@@ -43,6 +49,7 @@ function ensureServerStarted(): void {
     log.info("plugin_initializing", { port });
     serverStartPromise = wsServer.start().then(() => {
       log.info("plugin_ready", { port: wsServer.getPort() });
+      refreshSyncData();
     }).catch((error: unknown) => {
       serverStartPromise = null;
       log.error("ws_start_failed", { error: getUnknownErrorMessage(error) });
@@ -63,7 +70,51 @@ function ensureServerStarted(): void {
 }
 
 function refreshSyncData(now = Date.now()): void {
-  wsServer.setSyncData(registry.getSnapshots(now));
+  updateSyncData(registry.getSnapshots(now), now, true);
+}
+
+function updateSyncData(localSnapshots: SessionInfo[], now: number, persistLocal: boolean): void {
+  if (persistLocal) {
+    sharedSessionStore.write(localSnapshots, now);
+  }
+
+  const mergedSnapshots = sharedSessionStore.readMerged(localSnapshots, now);
+  const changed = haveSessionsChanged(sharedSyncCache, mergedSnapshots);
+
+  sharedSyncCache = mergedSnapshots;
+  wsServer.setSyncData(mergedSnapshots);
+
+  if (changed && wsServer.getPort() > 0) {
+    wsServer.broadcastSync();
+  }
+}
+
+function haveSessionsChanged(previous: SessionInfo[], next: SessionInfo[]): boolean {
+  if (previous.length !== next.length) {
+    return true;
+  }
+
+  for (let index = 0; index < previous.length; index += 1) {
+    const left = previous[index];
+    const right = next[index];
+
+    if (!left || !right) {
+      return true;
+    }
+
+    if (
+      left.sessionId !== right.sessionId ||
+      left.name !== right.name ||
+      left.state !== right.state ||
+      left.label !== right.label ||
+      left.tokens.total !== right.tokens.total ||
+      left.tokens.rate !== right.tokens.rate
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function getOrCreateSession(
@@ -363,6 +414,10 @@ export const server: Plugin = async () => {
     },
     "tool.execute.after": async (input) => {
       handleToolAfter(input);
+    },
+    unload: async () => {
+      sharedSessionStore.remove();
+      updateSyncData([], Date.now(), false);
     },
   };
 };

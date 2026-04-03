@@ -161,6 +161,15 @@ export class AvatarWSServer {
     this.syncData = sessions;
   }
 
+  broadcastSync(): void {
+    const message: SyncMessage = {
+      type: "sync",
+      sessions: this.syncData,
+    };
+
+    this.broadcast(message);
+  }
+
   broadcast(message: PluginMessage): void {
     const payload = JSON.stringify(message);
 
