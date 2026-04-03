@@ -127,8 +127,7 @@ pub fn run() {
 
 #[cfg(target_os = "macos")]
 fn configure_overlay_window<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri::Result<()> {
-    use cocoa::appkit::{NSWindow, NSWindowCollectionBehavior};
-    use cocoa::base::{id, NO};
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
     use tauri::Manager;
 
     let window = app
@@ -150,13 +149,16 @@ fn configure_overlay_window<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri
 
     let ns_window = window
         .ns_window()
-        .expect("failed to get native macOS window") as id;
+        .expect("failed to get native macOS window")
+        .cast::<NSWindow>();
 
     unsafe {
-        ns_window.setHasShadow_(NO);
-        ns_window.setCollectionBehavior_(
-            NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
-                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary,
+        let ns_window = ns_window
+            .as_ref()
+            .expect("native macOS window pointer was null");
+        ns_window.setHasShadow(false);
+        ns_window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::Stationary,
         );
     }
 
