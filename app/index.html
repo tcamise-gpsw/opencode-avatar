@@ -87,6 +87,10 @@
         width: min(420px, calc(100vw - 16px));
       }
 
+      #robot-context-menu {
+        width: min(220px, calc(100vw - 16px));
+      }
+
       #permission-popup {
         width: min(300px, calc(100vw - 16px));
       }
@@ -136,6 +140,25 @@
         color: #fca5a5;
       }
 
+      #robot-context-menu .menu-title {
+        margin-bottom: 8px;
+        color: #f8fafc;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #robot-context-menu .menu-actions {
+        display: grid;
+        gap: 8px;
+      }
+
+      #robot-context-menu button {
+        width: 100%;
+        text-align: left;
+      }
+
       #permission-title {
         margin-bottom: 8px;
         color: #f8fafc;
@@ -152,6 +175,12 @@
         <button id="prompt-close" type="button">✕</button>
       </div>
       <p id="prompt-feedback"></p>
+    </div>
+    <div id="robot-context-menu" class="panel" aria-hidden="true">
+      <p id="context-menu-title" class="menu-title"></p>
+      <div class="menu-actions">
+        <button id="context-menu-toggle-size" type="button">Maximize Robot</button>
+      </div>
     </div>
     <div id="permission-popup" class="panel" aria-hidden="true">
       <p id="permission-title"></p>
