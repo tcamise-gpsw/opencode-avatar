@@ -11,7 +11,7 @@ export interface StateAnimationConfig {
 
 /** Full animation config map */
 export const STATE_ANIMATIONS: Record<AvatarState, StateAnimationConfig> = {
-  idle: { bodyAnim: "breathe", headAnim: "neutral", faceFrame: "sleeping", fps: 6 },
+  idle: { bodyAnim: "idle", headAnim: "neutral", faceFrame: "sleeping", fps: 6 },
   thinking: { bodyAnim: "breathe", headAnim: "tilt", faceFrame: "dots", fps: 8 },
   reading: { bodyAnim: "lean", headAnim: "neutral", faceFrame: "scan", fps: 8 },
   editing: { bodyAnim: "typing", headAnim: "neutral", faceFrame: "focused", fps: 8 },
