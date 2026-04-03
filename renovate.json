@@ -1,0 +1,77 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    ":semanticCommitScope(deps)"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "schedule": [
+    "before 9am on Monday"
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "@opencode-ai/plugin"
+      ],
+      "enabled": false
+    },
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchPackageNames": [
+        "/^@tauri-apps\\//",
+        "tauri",
+        "tauri-build",
+        "/^tauri-plugin-/"
+      ],
+      "groupName": "tauri"
+    },
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchPackageNames": [
+        "vitest",
+        "/^@vitest\\//"
+      ],
+      "groupName": "testing"
+    },
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchPackageNames": [
+        "/^@commitlint\\//",
+        "typescript",
+        "vite"
+      ],
+      "groupName": "tooling"
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "github actions"
+    }
+  ]
+}
