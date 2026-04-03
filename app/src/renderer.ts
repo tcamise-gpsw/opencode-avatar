@@ -120,9 +120,11 @@ export class AvatarRenderer {
 
       await app.init({
         antialias: false,
+        autoDensity: true,
         backgroundAlpha: 0,
         canvas: options.canvas,
         height: MIN_CANVAS_HEIGHT,
+        resolution: this.getRendererResolution(),
         width: RENDERER_WIDTH,
       });
 
@@ -265,8 +267,9 @@ export class AvatarRenderer {
 
     const nextWidth = Math.max(RENDERER_WIDTH, Math.floor(width));
     const nextHeight = Math.max(MIN_CANVAS_HEIGHT, Math.floor(height));
+    const resolution = this.getRendererResolution();
 
-    this.app.renderer.resize(nextWidth, nextHeight);
+    this.app.renderer.resize(nextWidth, nextHeight, resolution);
     this.relayout();
   }
 
@@ -637,7 +640,7 @@ export class AvatarRenderer {
       }
     }
 
-    this.app.renderer.resize(viewportWidth, viewportHeight);
+    this.app.renderer.resize(viewportWidth, viewportHeight, this.getRendererResolution());
 
     log.debug("renderer_relayout", {
       viewportHeight,
@@ -1275,6 +1278,12 @@ export class AvatarRenderer {
   private getMaximizedWindowSize(): number {
     const screenHeight = Number.isFinite(window.screen?.availHeight) ? window.screen.availHeight : window.innerHeight;
     return Math.max(LAYOUT.robotSize, Math.floor(screenHeight));
+  }
+
+  private getRendererResolution(): number {
+    const devicePixelRatio = window.devicePixelRatio;
+
+    return Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1;
   }
 
   private isSessionMaximized(sessionId: string): boolean {

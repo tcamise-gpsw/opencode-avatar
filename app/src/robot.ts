@@ -46,6 +46,8 @@ export class Robot {
 
     this.bodySprite = new Sprite(this.getTexture("body-idle-0"));
     this.faceSprite = new Sprite(this.getTexture("face-neutral"));
+    this.bodySprite.roundPixels = true;
+    this.faceSprite.roundPixels = true;
     this.faceSprite.position.set(9, 5);
 
     this.container.addChild(this.bodySprite, this.faceSprite);
