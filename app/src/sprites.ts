@@ -44,12 +44,17 @@ function generateTexture(renderer: TextureRenderer, drawFn: (g: Graphics) => voi
   drawFn(graphics);
   container.addChild(graphics);
 
-  return renderer.generateTexture({
+  const texture = renderer.generateTexture({
     target: container,
     frame,
     resolution: 1,
     antialias: false,
   });
+
+  texture.source.scaleMode = "nearest";
+  texture.source.style.update();
+
+  return texture;
 }
 
 function drawBaseBody(g: Graphics, xOffset = 0, yOffset = 0, armOffset = 0): void {
