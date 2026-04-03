@@ -3,6 +3,7 @@ node_modules/
 .pnpm-store/
 
 **/.playwright-mcp/
+*-proof.png
 
 # Build output
 dist/

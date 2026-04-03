@@ -33,11 +33,14 @@ type ManagedRobot = {
   readonly robot: Robot;
   readonly flames: TokenFlameEffect;
   readonly createdAt: number;
+  readonly hitbox: HTMLDivElement;
   session: SessionSnapshot;
 };
 
 export type AvatarRendererInitOptions = {
   canvas?: HTMLCanvasElement;
+  mount?: HTMLElement | null;
+  tooltip?: HTMLElement | null;
 };
 
 export class AvatarRenderer {
@@ -52,6 +55,8 @@ export class AvatarRenderer {
   private animationFrame: number | null = null;
   private lastFrameTime = 0;
   private lifecycleVersion = 0;
+  private rootElement: HTMLElement | null = null;
+  private tooltipElement: HTMLElement | null = null;
 
   async init(options: AvatarRendererInitOptions = {}): Promise<void> {
     if (this.initialized) {
@@ -82,6 +87,12 @@ export class AvatarRenderer {
 
       this.app = app;
       this.robotLayer = robotLayer;
+      this.rootElement = options.mount instanceof HTMLElement
+        ? options.mount
+        : app.canvas.parentElement instanceof HTMLElement
+          ? app.canvas.parentElement
+          : null;
+      this.tooltipElement = options.tooltip instanceof HTMLElement ? options.tooltip : null;
       this.textures = generateSpriteTextures(app);
       this.robotLayer.eventMode = "none";
       this.app.stage.eventMode = "none";
@@ -231,6 +242,7 @@ export class AvatarRenderer {
     }
 
     for (const managed of this.robots.values()) {
+      managed.hitbox.remove();
       managed.flames.destroy();
       managed.robot.destroy();
       managed.wrapper.destroy({ children: true });
@@ -241,6 +253,8 @@ export class AvatarRenderer {
     this.app?.destroy(true, { children: true, texture: true });
     this.app = null;
     this.robotLayer = null;
+    this.rootElement = null;
+    this.tooltipElement = null;
     this.pendingOperations.length = 0;
     this.initialized = false;
     this.initPromise = null;
@@ -282,6 +296,7 @@ export class AvatarRenderer {
 
     const robot = new Robot(sessionId, this.textures);
     const flames = new TokenFlameEffect();
+    const hitbox = this.createHitbox(sessionId);
     flames.container.scale.set(FLAME_SCALE);
     flames.container.y = FLAME_Y;
 
@@ -296,6 +311,7 @@ export class AvatarRenderer {
     const managed: ManagedRobot = {
       createdAt: Date.now(),
       flames,
+      hitbox,
       robot,
       session: {
         label: seed.label ?? null,
@@ -325,6 +341,7 @@ export class AvatarRenderer {
 
     this.robots.delete(sessionId);
     this.robotLayer?.removeChild(managed.wrapper);
+    managed.hitbox.remove();
     managed.flames.destroy();
     managed.robot.destroy();
     managed.wrapper.destroy({ children: true });
@@ -358,6 +375,7 @@ export class AvatarRenderer {
     ordered.forEach((managed, index) => {
       managed.wrapper.x = baseX;
       managed.wrapper.y = baseY - index * (LAYOUT.robotSize + LAYOUT.robotGap);
+      this.positionHitbox(managed);
     });
 
     this.app.renderer.resize(viewportWidth, viewportHeight);
@@ -405,4 +423,79 @@ export class AvatarRenderer {
     this.lastFrameTime = 0;
     this.animationFrame = requestAnimationFrame(step);
   }
+
+  private createHitbox(sessionId: string): HTMLDivElement {
+    const hitbox = document.createElement("div");
+    hitbox.dataset.sessionId = sessionId;
+    hitbox.style.position = "fixed";
+    hitbox.style.width = `${LAYOUT.robotSize}px`;
+    hitbox.style.height = `${LAYOUT.robotSize}px`;
+    hitbox.style.pointerEvents = "auto";
+    hitbox.style.background = "transparent";
+    hitbox.style.zIndex = "9998";
+
+    hitbox.addEventListener("pointerenter", (event) => {
+      this.showTooltip(sessionId, event.clientX, event.clientY);
+    });
+    hitbox.addEventListener("pointermove", (event) => {
+      this.showTooltip(sessionId, event.clientX, event.clientY);
+    });
+    hitbox.addEventListener("pointerleave", () => {
+      this.hideTooltip();
+    });
+
+    this.rootElement?.appendChild(hitbox);
+    return hitbox;
+  }
+
+  private positionHitbox(managed: ManagedRobot): void {
+    managed.hitbox.style.left = `${managed.wrapper.x}px`;
+    managed.hitbox.style.top = `${managed.wrapper.y}px`;
+  }
+
+  private showTooltip(sessionId: string, clientX: number, clientY: number): void {
+    const tooltip = this.tooltipElement;
+    const managed = this.robots.get(sessionId);
+    if (!tooltip || !managed) {
+      return;
+    }
+
+    const displayName = this.getDisplayName(managed);
+    tooltip.innerHTML = `<strong>${escapeHtml(displayName)}</strong><span>${escapeHtml(managed.session.sessionId)}</span>`;
+    tooltip.style.display = "block";
+    tooltip.setAttribute("aria-hidden", "false");
+
+    const left = Math.max(8, clientX - tooltip.offsetWidth - 12);
+    const top = Math.max(8, clientY - tooltip.offsetHeight / 2);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  private hideTooltip(): void {
+    const tooltip = this.tooltipElement;
+    if (!tooltip) {
+      return;
+    }
+
+    tooltip.style.display = "none";
+    tooltip.setAttribute("aria-hidden", "true");
+  }
+
+  private getDisplayName(managed: ManagedRobot): string {
+    return managed.session.name.trim() || managed.session.sessionId;
+  }
+
+  private getTooltipText(managed: ManagedRobot): string {
+    const displayName = managed.session.name.trim() || managed.session.sessionId;
+    return `${displayName}\n${managed.session.sessionId}`;
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
