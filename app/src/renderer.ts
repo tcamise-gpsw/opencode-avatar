@@ -44,6 +44,8 @@ type SessionSnapshot = {
   } | null;
 };
 
+type FloatingUiMode = "none" | "tooltip" | "prompt" | "context-menu" | "permission";
+
 type ManagedRobot = {
   readonly wrapper: Container;
   readonly robot: Robot;
@@ -81,6 +83,9 @@ export class AvatarRenderer {
   private promptSendButtonElement: HTMLButtonElement | null = null;
   private promptCloseButtonElement: HTMLButtonElement | null = null;
   private promptFeedbackElement: HTMLElement | null = null;
+  private contextMenuElement: HTMLElement | null = null;
+  private contextMenuTitleElement: HTMLElement | null = null;
+  private contextMenuToggleSizeButtonElement: HTMLButtonElement | null = null;
   private permissionPopupElement: HTMLElement | null = null;
   private permissionTitleElement: HTMLElement | null = null;
   private permissionAllowButtonElement: HTMLButtonElement | null = null;
@@ -88,7 +93,11 @@ export class AvatarRenderer {
   private activePromptSessionId: string | null = null;
   private activePermission: { sessionId: string; permissionId: string } | null = null;
   private activeTooltipSessionId: string | null = null;
+  private activeContextMenuSessionId: string | null = null;
+  private maximizedSessionId: string | null = null;
+  private floatingUiMode: FloatingUiMode = "none";
   private windowExpanded = false;
+  private appliedWindowModeKey: string | null = null;
   private resizeSettleTimer: ReturnType<typeof setTimeout> | null = null;
   private tooltipShowTimer: ReturnType<typeof setTimeout> | null = null;
   private tooltipHideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -133,6 +142,9 @@ export class AvatarRenderer {
       this.promptSendButtonElement = document.getElementById("prompt-send") as HTMLButtonElement | null;
       this.promptCloseButtonElement = document.getElementById("prompt-close") as HTMLButtonElement | null;
       this.promptFeedbackElement = document.getElementById("prompt-feedback");
+      this.contextMenuElement = document.getElementById("robot-context-menu");
+      this.contextMenuTitleElement = document.getElementById("context-menu-title");
+      this.contextMenuToggleSizeButtonElement = document.getElementById("context-menu-toggle-size") as HTMLButtonElement | null;
       this.permissionPopupElement = document.getElementById("permission-popup");
       this.permissionTitleElement = document.getElementById("permission-title");
       this.permissionAllowButtonElement = document.getElementById("permission-allow") as HTMLButtonElement | null;
@@ -143,6 +155,17 @@ export class AvatarRenderer {
       });
       this.promptCloseButtonElement?.addEventListener("click", () => {
         this.hidePromptPanel();
+      });
+      this.contextMenuElement?.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+      });
+      this.contextMenuToggleSizeButtonElement?.addEventListener("click", () => {
+        const sessionId = this.activeContextMenuSessionId;
+        if (!sessionId) {
+          return;
+        }
+
+        this.toggleMaximizedSession(sessionId);
       });
       this.promptInputElement?.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
@@ -166,8 +189,34 @@ export class AvatarRenderer {
 
       window.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
+          this.hideContextMenu();
           this.hidePromptPanel();
         }
+      });
+      window.addEventListener("pointerdown", (event) => {
+        const menu = this.contextMenuElement;
+        if (!menu || this.activeContextMenuSessionId === null) {
+          return;
+        }
+
+        const target = event.target;
+        if (!(target instanceof Node)) {
+          this.hideContextMenu();
+          return;
+        }
+
+        if (menu.contains(target)) {
+          return;
+        }
+
+        if (target instanceof HTMLElement && target.dataset.sessionId) {
+          return;
+        }
+
+        this.hideContextMenu();
+      }, true);
+      window.addEventListener("blur", () => {
+        this.hideContextMenu();
       });
       this.textures = generateSpriteTextures(app);
       this.robotLayer.eventMode = "none";
@@ -338,6 +387,9 @@ export class AvatarRenderer {
     this.promptSendButtonElement = null;
     this.promptCloseButtonElement = null;
     this.promptFeedbackElement = null;
+    this.contextMenuElement = null;
+    this.contextMenuTitleElement = null;
+    this.contextMenuToggleSizeButtonElement = null;
     this.permissionPopupElement = null;
     this.permissionTitleElement = null;
     this.permissionAllowButtonElement = null;
@@ -345,7 +397,11 @@ export class AvatarRenderer {
     this.activePromptSessionId = null;
     this.activePermission = null;
     this.activeTooltipSessionId = null;
+    this.activeContextMenuSessionId = null;
+    this.maximizedSessionId = null;
+    this.floatingUiMode = "none";
     this.windowExpanded = false;
+    this.appliedWindowModeKey = null;
     if (this.resizeSettleTimer) {
       clearTimeout(this.resizeSettleTimer);
       this.resizeSettleTimer = null;
@@ -464,7 +520,16 @@ export class AvatarRenderer {
     }
 
     if (this.activeTooltipSessionId === sessionId) {
-      this.hideTooltip();
+      this.hideTooltip(true);
+    }
+
+    if (this.activeContextMenuSessionId === sessionId) {
+      this.hideContextMenu();
+    }
+
+    if (this.maximizedSessionId === sessionId) {
+      this.maximizedSessionId = null;
+      this.updateWindowExpansion();
     }
 
     this.robotLayer?.removeChild(managed.wrapper);
@@ -498,12 +563,38 @@ export class AvatarRenderer {
     );
     const baseX = viewportWidth - LAYOUT.edgeMargin - LAYOUT.robotSize;
     const baseY = viewportHeight - LAYOUT.edgeMargin - LAYOUT.robotSize;
+    const maximized = this.maximizedSessionId ? this.robots.get(this.maximizedSessionId) ?? null : null;
 
-    ordered.forEach((managed, index) => {
-      managed.wrapper.x = baseX;
-      managed.wrapper.y = baseY - index * (LAYOUT.robotSize + LAYOUT.robotGap);
-      this.positionHitbox(managed);
-    });
+    if (!maximized && this.maximizedSessionId !== null) {
+      this.maximizedSessionId = null;
+      this.updateWindowExpansion();
+    }
+
+    if (maximized) {
+      const maximizedSize = this.getMaximizedRobotSize(viewportWidth, viewportHeight);
+      const maximizedScale = maximizedSize / LAYOUT.robotSize;
+
+      ordered.forEach((managed) => {
+        if (managed.session.sessionId !== maximized.session.sessionId) {
+          this.hideManagedRobot(managed);
+          return;
+        }
+
+        this.showManagedRobot(managed);
+        this.setManagedScale(managed, maximizedScale);
+        managed.wrapper.x = viewportWidth - maximizedSize;
+        managed.wrapper.y = viewportHeight - maximizedSize;
+        this.positionHitbox(managed);
+      });
+    } else {
+      ordered.forEach((managed, index) => {
+        this.showManagedRobot(managed);
+        this.setManagedScale(managed, 1);
+        managed.wrapper.x = baseX;
+        managed.wrapper.y = baseY - index * (LAYOUT.robotSize + LAYOUT.robotGap);
+        this.positionHitbox(managed);
+      });
+    }
 
     if (this.activePromptSessionId) {
       const managed = this.robots.get(this.activePromptSessionId);
@@ -523,6 +614,13 @@ export class AvatarRenderer {
       const managed = this.robots.get(this.activeTooltipSessionId);
       if (managed && this.tooltipElement) {
         this.positionTooltipNearRobot(this.tooltipElement, managed);
+      }
+    }
+
+    if (this.activeContextMenuSessionId) {
+      const managed = this.robots.get(this.activeContextMenuSessionId);
+      if (managed && this.contextMenuElement) {
+        this.positionContextMenuNearRobot(this.contextMenuElement, managed);
       }
     }
 
@@ -592,7 +690,14 @@ export class AvatarRenderer {
       this.hideTooltip();
     });
     hitbox.addEventListener("click", () => {
+      this.hideContextMenu();
       this.togglePromptPanel(sessionId);
+    });
+    hitbox.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.hideTooltip(true);
+      this.showContextMenu(sessionId, event.clientX, event.clientY);
     });
 
     this.rootElement?.appendChild(hitbox);
@@ -600,6 +705,15 @@ export class AvatarRenderer {
   }
 
   private positionHitbox(managed: ManagedRobot): void {
+    if (!managed.wrapper.visible) {
+      managed.hitbox.style.display = "none";
+      return;
+    }
+
+    const size = this.getManagedRobotSize(managed);
+    managed.hitbox.style.display = "block";
+    managed.hitbox.style.width = `${size}px`;
+    managed.hitbox.style.height = `${size}px`;
     managed.hitbox.style.left = `${managed.wrapper.x}px`;
     managed.hitbox.style.top = `${managed.wrapper.y}px`;
   }
@@ -608,6 +722,10 @@ export class AvatarRenderer {
     const tooltip = this.tooltipElement;
     const managed = this.robots.get(sessionId);
     if (!tooltip || !managed) {
+      return;
+    }
+
+    if (this.floatingUiMode !== "none" && this.floatingUiMode !== "tooltip") {
       return;
     }
 
@@ -638,6 +756,7 @@ export class AvatarRenderer {
 
     const wasExpanded = this.windowExpanded;
     this.activeTooltipSessionId = sessionId;
+    this.floatingUiMode = "tooltip";
     this.updateWindowExpansion();
 
     const showResolvedTooltip = () => {
@@ -666,7 +785,7 @@ export class AvatarRenderer {
     );
   }
 
-  private hideTooltip(): void {
+  private hideTooltip(immediate = false, suppressUpdate = false): void {
     const tooltip = this.tooltipElement;
     if (!tooltip) {
       return;
@@ -682,6 +801,19 @@ export class AvatarRenderer {
       this.tooltipHideTimer = null;
     }
 
+    if (immediate) {
+      tooltip.style.display = "none";
+      tooltip.setAttribute("aria-hidden", "true");
+      this.activeTooltipSessionId = null;
+      if (this.floatingUiMode === "tooltip") {
+        this.floatingUiMode = "none";
+      }
+      if (!suppressUpdate) {
+        this.updateWindowExpansion();
+      }
+      return;
+    }
+
     this.tooltipHideTimer = setTimeout(() => {
       this.tooltipHideTimer = null;
       if (!this.tooltipElement) {
@@ -691,7 +823,12 @@ export class AvatarRenderer {
       this.tooltipElement.style.display = "none";
       this.tooltipElement.setAttribute("aria-hidden", "true");
       this.activeTooltipSessionId = null;
-      this.updateWindowExpansion();
+      if (this.floatingUiMode === "tooltip") {
+        this.floatingUiMode = "none";
+      }
+      if (!suppressUpdate) {
+        this.updateWindowExpansion();
+      }
     }, TOOLTIP_HIDE_DELAY_MS);
   }
 
@@ -727,13 +864,19 @@ export class AvatarRenderer {
       return;
     }
 
+    if (this.activePermission !== null) {
+      return;
+    }
+
     const managed = this.robots.get(sessionId);
     if (!managed) {
       return;
     }
 
+    this.hideContextMenu(true);
+    this.hideTooltip(true, true);
     this.activePromptSessionId = sessionId;
-    this.hideTooltip();
+    this.floatingUiMode = "prompt";
     this.positionPanelNearRobot(panel, managed);
     panel.style.display = "block";
     panel.classList.add("visible");
@@ -745,19 +888,29 @@ export class AvatarRenderer {
     }, 0);
   }
 
-  private hidePromptPanel(): void {
+  private hidePromptPanel(suppressUpdate = false): void {
     const panel = this.promptPanelElement;
     if (!panel) {
       this.activePromptSessionId = null;
-      this.updateWindowExpansion();
+      if (this.floatingUiMode === "prompt") {
+        this.floatingUiMode = "none";
+      }
+      if (!suppressUpdate) {
+        this.updateWindowExpansion();
+      }
       return;
     }
 
     panel.classList.remove("visible");
     panel.style.display = "none";
     this.activePromptSessionId = null;
+    if (this.floatingUiMode === "prompt") {
+      this.floatingUiMode = "none";
+    }
     this.setPromptFeedback(null, false);
-    this.updateWindowExpansion();
+    if (!suppressUpdate) {
+      this.updateWindowExpansion();
+    }
   }
 
   private submitPrompt(): void {
@@ -821,10 +974,13 @@ export class AvatarRenderer {
     }
 
     if (this.activePromptSessionId === sessionId) {
-      this.hidePromptPanel();
+      this.hidePromptPanel(true);
     }
 
+    this.hideContextMenu(true);
+    this.hideTooltip(true, true);
     this.activePermission = { sessionId, permissionId };
+    this.floatingUiMode = "permission";
     titleElement.textContent = title;
     this.positionPanelNearRobot(popup, managed);
     popup.style.display = "block";
@@ -832,7 +988,7 @@ export class AvatarRenderer {
     this.updateWindowExpansion();
   }
 
-  private hidePermissionPopup(): void {
+  private hidePermissionPopup(suppressUpdate = false): void {
     const popup = this.permissionPopupElement;
     if (popup) {
       popup.classList.remove("visible");
@@ -840,7 +996,12 @@ export class AvatarRenderer {
     }
 
     this.activePermission = null;
-    this.updateWindowExpansion();
+    if (this.floatingUiMode === "permission") {
+      this.floatingUiMode = "none";
+    }
+    if (!suppressUpdate) {
+      this.updateWindowExpansion();
+    }
   }
 
   private submitPermissionReply(allow: boolean): void {
@@ -852,11 +1013,75 @@ export class AvatarRenderer {
     this.onPermissionReply?.(active.sessionId, active.permissionId, allow);
   }
 
+  private showContextMenu(sessionId: string, _anchorX: number, _anchorY: number): void {
+    const menu = this.contextMenuElement;
+    const title = this.contextMenuTitleElement;
+    const toggleButton = this.contextMenuToggleSizeButtonElement;
+    const managed = this.robots.get(sessionId);
+    if (!menu || !title || !toggleButton || !managed) {
+      return;
+    }
+
+    if (this.activePermission !== null) {
+      return;
+    }
+
+    this.hidePromptPanel(true);
+    this.hideTooltip(true, true);
+
+    this.activeContextMenuSessionId = sessionId;
+    this.floatingUiMode = "context-menu";
+    title.textContent = this.getDisplayName(managed);
+    toggleButton.textContent = this.isSessionMaximized(sessionId) ? "Restore Robot Size" : "Maximize Robot";
+    menu.style.display = "block";
+    menu.classList.add("visible");
+    this.positionContextMenuNearRobot(menu, managed);
+    this.updateWindowExpansion();
+  }
+
+  private hideContextMenu(suppressUpdate = false): void {
+    const menu = this.contextMenuElement;
+    if (menu) {
+      menu.classList.remove("visible");
+      menu.style.display = "none";
+    }
+
+    this.activeContextMenuSessionId = null;
+    if (this.floatingUiMode === "context-menu") {
+      this.floatingUiMode = "none";
+    }
+    if (!suppressUpdate) {
+      this.updateWindowExpansion();
+    }
+  }
+
+  private toggleMaximizedSession(sessionId: string): void {
+    const nextSessionId = this.maximizedSessionId === sessionId ? null : sessionId;
+
+    this.hideContextMenu(true);
+    this.hideTooltip(true, true);
+    this.hidePromptPanel(true);
+
+    if (this.activePermission && nextSessionId !== this.activePermission.sessionId) {
+      this.hidePermissionPopup(true);
+    }
+
+    this.maximizedSessionId = nextSessionId;
+    this.updateWindowExpansion();
+    this.relayout();
+
+    log.info("renderer_maximized_session_toggled", {
+      maximized: nextSessionId === sessionId,
+      sessionId,
+    });
+  }
+
   private positionPanelNearRobot(panel: HTMLElement, managed: ManagedRobot): void {
     const margin = 8;
     const gap = 12;
     const isPromptPanel = panel.id === "prompt-panel";
     const leftBias = isPromptPanel ? PROMPT_PANEL_LEFT_BIAS : 0;
+    const robotSize = this.getManagedRobotSize(managed);
 
     if (isPromptPanel) {
       const maxSpace = Math.max(120, Math.floor(managed.wrapper.x - gap - margin));
@@ -876,12 +1101,12 @@ export class AvatarRenderer {
     const maxTop = Math.max(margin, window.innerHeight - panelHeight - margin);
 
     const preferredLeft = managed.wrapper.x - panelWidth - gap - leftBias;
-    const fallbackRight = managed.wrapper.x + LAYOUT.robotSize + gap;
+    const fallbackRight = managed.wrapper.x + robotSize + gap;
     const left = isPromptPanel
       ? Math.min(maxLeft, Math.max(margin, preferredLeft))
       : Math.min(maxLeft, Math.max(margin, preferredLeft < margin ? fallbackRight : preferredLeft));
 
-    const centeredTop = managed.wrapper.y + LAYOUT.robotSize / 2 - panelHeight / 2;
+    const centeredTop = managed.wrapper.y + robotSize / 2 - panelHeight / 2;
     const top = Math.min(maxTop, Math.max(margin, centeredTop));
 
     panel.style.left = `${left}px`;
@@ -889,19 +1114,20 @@ export class AvatarRenderer {
   }
 
   private updateWindowExpansion(): void {
-    const shouldExpand =
-      this.activePromptSessionId !== null ||
-      this.activePermission !== null ||
-      this.activeTooltipSessionId !== null;
-    if (shouldExpand === this.windowExpanded) {
+    const nextModeKey = this.getWindowModeKey();
+    if (nextModeKey === this.appliedWindowModeKey) {
       return;
     }
 
-    this.windowExpanded = shouldExpand;
-    if (shouldExpand) {
+    this.appliedWindowModeKey = nextModeKey;
+    this.windowExpanded = nextModeKey !== "default";
+
+    if (nextModeKey.startsWith("maximized:")) {
+      void this.invokeTauri("maximize_window", { size: this.getMaximizedWindowSize() });
+    } else if (nextModeKey.startsWith("expanded:")) {
       void this.invokeTauri("expand_window", { width: EXPANDED_OVERLAY_WIDTH });
     } else {
-      void this.invokeTauri("shrink_window");
+      void this.invokeTauri("restore_window");
     }
 
     this.scheduleFloatingReposition();
@@ -978,6 +1204,7 @@ export class AvatarRenderer {
   private positionTooltipNearRobot(tooltip: HTMLElement, managed: ManagedRobot): void {
     const margin = 8;
     const anchorX = managed.wrapper.x;
+    const robotSize = this.getManagedRobotSize(managed);
 
     const maxSpace = Math.max(120, Math.floor(anchorX - TOOLTIP_GAP - margin));
     const effectiveBias = Math.min(TOOLTIP_LEFT_BIAS, Math.max(0, maxSpace - TOOLTIP_MAX_WIDTH));
@@ -994,7 +1221,7 @@ export class AvatarRenderer {
     const maxLeft = Math.max(margin, window.innerWidth - tooltipWidth - margin);
     const maxTop = Math.max(margin, window.innerHeight - tooltipHeight - margin);
 
-    const anchorY = managed.wrapper.y + LAYOUT.robotSize / 2;
+    const anchorY = managed.wrapper.y + robotSize / 2;
 
     const preferredLeft = anchorX - tooltipWidth - TOOLTIP_GAP - effectiveBias;
     const left = Math.min(maxLeft, Math.max(margin, preferredLeft));
@@ -1008,6 +1235,71 @@ export class AvatarRenderer {
 
   private getDisplayName(managed: ManagedRobot): string {
     return managed.session.name.trim() || managed.session.sessionId;
+  }
+
+  private setManagedScale(managed: ManagedRobot, scale: number): void {
+    managed.wrapper.scale.set(scale);
+  }
+
+  private showManagedRobot(managed: ManagedRobot): void {
+    managed.wrapper.visible = true;
+    managed.hitbox.style.display = "block";
+  }
+
+  private hideManagedRobot(managed: ManagedRobot): void {
+    managed.wrapper.visible = false;
+    managed.hitbox.style.display = "none";
+  }
+
+  private getManagedRobotSize(managed: ManagedRobot): number {
+    return Math.max(LAYOUT.robotSize, Math.round(LAYOUT.robotSize * managed.wrapper.scale.x));
+  }
+
+  private getMaximizedRobotSize(viewportWidth: number, viewportHeight: number): number {
+    return Math.max(LAYOUT.robotSize, Math.min(viewportWidth, viewportHeight));
+  }
+
+  private getMaximizedWindowSize(): number {
+    const screenHeight = Number.isFinite(window.screen?.availHeight) ? window.screen.availHeight : window.innerHeight;
+    return Math.max(LAYOUT.robotSize, Math.floor(screenHeight));
+  }
+
+  private isSessionMaximized(sessionId: string): boolean {
+    return this.maximizedSessionId === sessionId;
+  }
+
+  private getWindowModeKey(): string {
+    if (this.maximizedSessionId) {
+      return `maximized:${this.getMaximizedWindowSize()}`;
+    }
+
+    if (this.floatingUiMode !== "none") {
+      return `expanded:${EXPANDED_OVERLAY_WIDTH}`;
+    }
+
+    return "default";
+  }
+
+  private positionContextMenuNearRobot(menu: HTMLElement, managed: ManagedRobot): void {
+    const margin = 8;
+    const gap = 12;
+    const robotSize = this.getManagedRobotSize(managed);
+
+    menu.style.left = "-9999px";
+    menu.style.top = "0px";
+
+    const menuWidth = menu.offsetWidth;
+    const menuHeight = menu.offsetHeight;
+    const maxLeft = Math.max(margin, window.innerWidth - menuWidth - margin);
+    const maxTop = Math.max(margin, window.innerHeight - menuHeight - margin);
+    const preferredLeft = managed.wrapper.x - menuWidth - gap;
+    const fallbackRight = managed.wrapper.x + robotSize + gap;
+    const left = Math.min(maxLeft, Math.max(margin, preferredLeft < margin ? fallbackRight : preferredLeft));
+    const centeredTop = managed.wrapper.y + robotSize / 2 - menuHeight / 2;
+    const top = Math.min(maxTop, Math.max(margin, centeredTop));
+
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
   }
 
   private getTooltipText(managed: ManagedRobot): string {

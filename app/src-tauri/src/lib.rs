@@ -1,11 +1,16 @@
 const DEFAULT_WINDOW_WIDTH: u32 = 200;
 
+fn logical_to_physical_size(value: u32, scale_factor: f64) -> u32 {
+  ((value as f64) * scale_factor).round().max(1.0) as u32
+}
+
 #[tauri::command]
 fn expand_window(window: tauri::Window, width: u32) -> Result<(), String> {
+  let scale_factor = window.scale_factor().map_err(|error| error.to_string())?;
   let current_size = window.outer_size().map_err(|error| error.to_string())?;
   let current_position = window.outer_position().map_err(|error| error.to_string())?;
 
-  let next_width = width.max(DEFAULT_WINDOW_WIDTH);
+  let next_width = logical_to_physical_size(width.max(DEFAULT_WINDOW_WIDTH), scale_factor);
   if next_width == current_size.width {
     return Ok(());
   }
@@ -31,20 +36,22 @@ fn expand_window(window: tauri::Window, width: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn shrink_window(window: tauri::Window) -> Result<(), String> {
+fn restore_window(window: tauri::Window) -> Result<(), String> {
+  let scale_factor = window.scale_factor().map_err(|error| error.to_string())?;
   let current_size = window.outer_size().map_err(|error| error.to_string())?;
   let current_position = window.outer_position().map_err(|error| error.to_string())?;
+  let default_width = logical_to_physical_size(DEFAULT_WINDOW_WIDTH, scale_factor);
 
-  if current_size.width == DEFAULT_WINDOW_WIDTH {
+  if current_size.width == default_width {
     return Ok(());
   }
 
   let right_edge = current_position.x + current_size.width as i32;
-  let next_x = right_edge - DEFAULT_WINDOW_WIDTH as i32;
+  let next_x = right_edge - default_width as i32;
 
   window
     .set_size(tauri::Size::Physical(tauri::PhysicalSize::new(
-      DEFAULT_WINDOW_WIDTH,
+      default_width,
       current_size.height,
     )))
     .map_err(|error| error.to_string())?;
@@ -59,10 +66,37 @@ fn shrink_window(window: tauri::Window) -> Result<(), String> {
   Ok(())
 }
 
+#[tauri::command]
+fn maximize_window(window: tauri::Window, size: u32) -> Result<(), String> {
+  let scale_factor = window.scale_factor().map_err(|error| error.to_string())?;
+  let current_position = window.outer_position().map_err(|error| error.to_string())?;
+  let next_size = logical_to_physical_size(size.max(DEFAULT_WINDOW_WIDTH), scale_factor);
+  let right_edge = current_position.x + window.outer_size().map_err(|error| error.to_string())?.width as i32;
+  let bottom_edge = current_position.y + window.outer_size().map_err(|error| error.to_string())?.height as i32;
+  let next_x = right_edge - next_size as i32;
+  let next_y = bottom_edge - next_size as i32;
+
+  window
+    .set_size(tauri::Size::Physical(tauri::PhysicalSize::new(
+      next_size,
+      next_size,
+    )))
+    .map_err(|error| error.to_string())?;
+
+  window
+    .set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+      next_x,
+      next_y,
+    )))
+    .map_err(|error| error.to_string())?;
+
+  Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![expand_window, shrink_window])
+    .invoke_handler(tauri::generate_handler![expand_window, restore_window, maximize_window])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
