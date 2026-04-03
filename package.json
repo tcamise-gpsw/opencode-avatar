@@ -5,10 +5,13 @@
   "scripts": {
     "test": "corepack pnpm -r --if-present test",
     "build": "corepack pnpm -r --if-present build",
+    "release:v1": "bash ./scripts/release-v1.sh",
     "dev:plugin": "corepack pnpm --filter @opencode-avatar/plugin dev",
     "dev:app": "corepack pnpm --filter @opencode-avatar/app dev"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
     "typescript": "^5.7.0"
   }
 }

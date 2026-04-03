@@ -94,3 +94,5 @@ After plugin source changes:
 2. Restart OpenCode processes
 
 Otherwise, logs/state behavior may reflect older plugin code.
+
+See the [Configuration Guide](configuration.md) for environment variables and runtime paths, and the [Developer Guide](../README-dev.md) for local development workflow.
