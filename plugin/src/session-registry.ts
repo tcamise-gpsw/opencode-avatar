@@ -55,6 +55,11 @@ export class SessionRegistry {
   private readonly sessions = new Map<string, SessionMeta>();
   private readonly groups = new Map<string, SessionGroup>();
 
+  clear(): void {
+    this.sessions.clear();
+    this.groups.clear();
+  }
+
   ensureSession(
     sessionId: string,
     options: {

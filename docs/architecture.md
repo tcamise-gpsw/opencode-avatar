@@ -111,7 +111,7 @@ Priority is defined in `shared/src/protocol.ts`, with `error` highest and `idle`
 
 ### WebSocket server
 
-`AvatarWSServer` listens on `AVATAR_WS_PORT` or `2728` by default. Only one plugin process can bind that port at a time. Each new client immediately receives a merged `sync` message, after which incremental `session` and `state` messages are broadcast. When the merged snapshot changes, the leader also rebroadcasts `sync` so already-connected overlays pick up sessions from other OpenCode processes.
+`AvatarWSServer` listens on `AVATAR_WS_PORT` or `2728` by default. Only one plugin process can bind that port at a time. Each new client immediately receives a merged `sync` message, after which incremental `session` and `state` messages are broadcast. When the merged snapshot changes, the leader also rebroadcasts `sync` so already-connected overlays pick up sessions from other OpenCode processes. Follower plugin instances keep retrying leadership so another active OpenCode process can take over if the current leader exits.
 
 The WebSocket server is bidirectional: it also accepts app `command` messages and sends back `command.result` replies.
 
