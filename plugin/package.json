@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "dev": "tsc --noEmit --watch",
+    "dev": "tsc --watch",
     "build": "tsc",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",

@@ -4,7 +4,7 @@
 
 The current implementation has three parts:
 
-1. `plugin/`: an OpenCode plugin that tracks session state, token throughput, and tool activity, then publishes updates over WebSocket.
+1. `plugin/`: an OpenCode plugin that tracks session state, token throughput, and tool activity, persists per-process snapshots under `~/.opencode-avatar/state/`, and publishes the merged view over WebSocket.
 2. `shared/`: the shared TypeScript protocol and state definitions used by both sides of the connection.
 3. `app/`: a Tauri 2 desktop shell that hosts a PixiJS renderer and connects to the plugin's WebSocket server.
 
@@ -27,7 +27,7 @@ OpenCode plugin -> WebSocket -> Tauri 2 + PixiJS app
 ```
 
 - `shared/src/protocol.ts` defines avatar states plus the `session`, `state`, and `sync` WebSocket message shapes.
-- `plugin/src/index.ts` listens to OpenCode hooks, feeds `SessionStateMachine` and `TokenTracker`, and broadcasts updates through `AvatarWSServer`.
+- `plugin/src/index.ts` listens to OpenCode hooks, feeds `SessionStateMachine` and `TokenTracker`, writes each plugin instance's grouped snapshots to the shared state directory, and broadcasts the merged view through `AvatarWSServer`.
 - `app/src/ws-client.ts` reconnects to the plugin WebSocket and forwards messages into `AvatarRenderer`.
 - `app/src/renderer.ts` manages one robot per active session and uses `sprites.ts`, `robot.ts`, and `flames.ts` to render the overlay.
 
@@ -48,15 +48,15 @@ corepack pnpm install
 
 ## Run
 
-The plugin does **not** run as a standalone server process. It is loaded by OpenCode, and `dev:plugin` only keeps the TypeScript package typechecked while you work.
+The plugin does **not** run as a standalone server process. It is loaded by OpenCode, and OpenCode executes the built artifact at `plugin/dist/index.js`.
 
-In one terminal, watch the plugin package:
+In one terminal, watch and rebuild the plugin package:
 
 ```bash
 corepack pnpm dev:plugin
 ```
 
-Register the plugin in your OpenCode config (`~/.config/opencode/config.json`), then start OpenCode so it loads `plugin/src/index.ts` and opens the avatar WebSocket server.
+Register the plugin in your OpenCode config (`~/.config/opencode/config.json`), then start OpenCode so it loads `plugin/dist/index.js` and opens the avatar WebSocket server.
 
 Example config snippet:
 
@@ -81,6 +81,8 @@ corepack pnpm dev:app
 ```
 
 Defaults expect the plugin WebSocket server on `ws://127.0.0.1:2728`.
+
+If you change plugin code, restart the relevant OpenCode processes after `plugin/dist/` has been rebuilt so they load the updated plugin runtime.
 
 Expected success signals:
 
@@ -109,7 +111,7 @@ Run the workspace test suite:
 corepack pnpm test
 ```
 
-The current automated tests live in `plugin/test/` and cover the state machine, token tracking, and WebSocket protocol.
+The current automated tests live in `plugin/test/` and cover the state machine, token tracking, shared session store, and WebSocket protocol.
 
 ## Environment Variables
 
@@ -118,6 +120,7 @@ The current automated tests live in `plugin/test/` and cover the state machine, 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AVATAR_WS_PORT` | `2728` | Port used by the plugin WebSocket server. |
+| `AVATAR_INSTANCE_ID` | random UUID per process | Optional stable ID for a plugin process when writing shared state snapshots. |
 | `AVATAR_LOG_LEVEL` | `info` | Plugin log verbosity: `debug`, `info`, `warn`, or `error`. |
 | `AVATAR_LOG_STDERR` | unset | When set to `1`, mirrors plugin logs to stderr in addition to `~/.opencode-avatar/logs/plugin.log`. |
 
@@ -144,6 +147,7 @@ To change the plugin WebSocket port, export `AVATAR_WS_PORT` in the environment 
 ## Logging
 
 - The plugin writes newline-delimited JSON logs to `~/.opencode-avatar/logs/plugin.log`.
+- The plugin also writes per-process session snapshots to `~/.opencode-avatar/state/` so one plugin instance can merge sessions from multiple OpenCode processes.
 - The frontend TypeScript logger currently writes structured logs to the browser console and respects `VITE_LOG_LEVEL` and `VITE_DEBUG`.
 - The Tauri Rust shell enables `tauri-plugin-log` in debug builds, but this repo does not currently configure the frontend app to persist its own logs into `~/.opencode-avatar/logs/`.
 

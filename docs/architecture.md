@@ -5,7 +5,7 @@
 The current runtime architecture is:
 
 ```text
-OpenCode plugin -> WebSocket -> Tauri 2 + PixiJS app
+OpenCode plugin instances -> shared state files + WebSocket leader -> Tauri 2 + PixiJS app
 ```
 
 This keeps OpenCode-facing logic inside the plugin while the desktop app stays focused on rendering.
@@ -23,6 +23,7 @@ This keeps OpenCode-facing logic inside the plugin while the desktop app stays f
 - `plugin/src/index.ts` is the OpenCode plugin entry point.
 - `plugin/src/state-machine.ts` converts OpenCode events into a stable avatar state with short hold windows for tools and errors.
 - `plugin/src/token-tracker.ts` tracks cumulative tokens plus a rolling five-second token rate.
+- `plugin/src/shared-session-store.ts` persists each plugin process's grouped session snapshots under `~/.opencode-avatar/state/` and merges live snapshots across processes.
 - `plugin/src/ws-server.ts` exposes the plugin state over a local WebSocket server.
 - `plugin/src/logger.ts` writes structured plugin logs to `~/.opencode-avatar/logs/plugin.log`.
 
@@ -38,12 +39,14 @@ This keeps OpenCode-facing logic inside the plugin while the desktop app stays f
 ## Data Flow
 
 1. OpenCode emits hook events such as session lifecycle updates, chat activity, tool execution, permission prompts, and errors.
-2. The plugin normalizes those events into per-session runtime state.
+2. Each plugin process normalizes those events into local per-session runtime state.
 3. `SessionStateMachine` determines the highest-priority visible avatar state.
 4. `TokenTracker` accumulates assistant token totals and computes a rolling token rate.
-5. `AvatarWSServer` broadcasts `session` and `state` messages and sends a `sync` snapshot to newly connected app clients.
-6. The app WebSocket client receives those messages and applies them to the PixiJS renderer.
-7. The renderer updates robot pose/state and flame intensity for each active session.
+5. `SessionRegistry` groups subagent sessions under a parent/root avatar using `parentID`.
+6. `SharedSessionStore` writes each process's grouped snapshots to `~/.opencode-avatar/state/` and merges non-stale snapshots from other processes.
+7. The plugin instance that successfully owns `AVATAR_WS_PORT` serves the merged `sync` view and broadcasts incremental `session` and `state` messages.
+8. The app WebSocket client receives those messages and applies them to the PixiJS renderer.
+9. The renderer updates robot pose/state and flame intensity for each active session.
 
 ## Shared Protocol
 
@@ -51,13 +54,13 @@ The shared protocol exists so the plugin and app can evolve independently while 
 
 - `session` messages announce create, resume, and end events.
 - `state` messages carry the current avatar state, display label, token totals, token rate, and timestamp.
-- `sync` messages provide the full active-session snapshot for newly connected clients and reconnect recovery.
+- `sync` messages provide the full active-session snapshot for newly connected clients, reconnect recovery, and cross-process session reconciliation.
 
 The protocol also centralizes tool-to-avatar-state mapping. Today that includes reading tools, editing tools, `Bash`, several Playwright browser actions, and `Task`.
 
 ## Plugin Responsibilities
 
-The plugin is the source of truth for avatar behavior.
+The plugin is the source of truth for avatar behavior. In multi-process setups, each plugin process owns its local session state while the WebSocket-owning process serves the merged cross-process view.
 
 ### State machine
 
@@ -75,9 +78,16 @@ Priority is defined in `shared/src/protocol.ts`, with `error` highest and `idle`
 
 `TokenTracker` stores cumulative token deltas from assistant message updates and calculates a rolling five-second rate. The app uses that rate to scale flame intensity.
 
+### Session grouping and cross-process merge
+
+- `SessionRegistry` collapses subagent sessions into their parent/root group so subagents do not create extra robots.
+- `SharedSessionStore` persists grouped session snapshots per plugin process.
+- Snapshot files older than 15 seconds are treated as stale and removed during merge.
+- The merge key is `sessionId`, so the merged `sync` payload represents one robot per root/grouped session across all running OpenCode processes.
+
 ### WebSocket server
 
-`AvatarWSServer` listens on `AVATAR_WS_PORT` or `2728` by default. Each new client immediately receives a `sync` message, after which incremental `session` and `state` messages are broadcast.
+`AvatarWSServer` listens on `AVATAR_WS_PORT` or `2728` by default. Only one plugin process can bind that port at a time. Each new client immediately receives a merged `sync` message, after which incremental `session` and `state` messages are broadcast. When the merged snapshot changes, the leader also rebroadcasts `sync` so already-connected overlays pick up sessions from other OpenCode processes.
 
 ## App Responsibilities
 
@@ -109,7 +119,9 @@ The app renders state; it does not derive state.
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `AVATAR_WS_PORT` | `2728` | WebSocket server port for the plugin. |
+| `AVATAR_INSTANCE_ID` | random UUID per process | Optional stable ID for shared session snapshot files. |
 | `AVATAR_LOG_LEVEL` | `info` | Plugin log filtering level. |
+| `AVATAR_LOG_STDERR` | unset | Mirrors plugin logs to stderr when set to `1`. |
 
 ### App env vars
 
@@ -122,6 +134,7 @@ The app renders state; it does not derive state.
 ## Logging Behavior
 
 - Plugin logs are persisted under `~/.opencode-avatar/logs/` and currently write to `plugin.log`.
+- Plugin shared session snapshots are persisted under `~/.opencode-avatar/state/`.
 - The frontend logger in `app/src/logger.ts` is console-based today; it does not write browser logs to files.
 - The Tauri shell enables `tauri-plugin-log` in debug builds, but this repo does not currently add explicit file-target configuration for app-side logs.
 
@@ -133,13 +146,13 @@ Install dependencies:
 corepack pnpm install
 ```
 
-Watch the plugin package while developing:
+Watch and rebuild the plugin package while developing:
 
 ```bash
 corepack pnpm dev:plugin
 ```
 
-Note: this only runs `tsc --noEmit --watch`. The plugin itself runs inside OpenCode after you register the local `plugin/` package in OpenCode config and launch OpenCode.
+Note: this runs `tsc --watch` so `plugin/dist/` stays current. The plugin itself still runs inside OpenCode after you register the local `plugin/` package in OpenCode config and launch OpenCode.
 
 Run the Tauri overlay app:
 
