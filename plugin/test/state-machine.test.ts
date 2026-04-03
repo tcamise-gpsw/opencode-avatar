@@ -118,6 +118,23 @@ describe("SessionStateMachine", () => {
       sm.onMessageDelta();
       expect(sm.getState()).toBe("thinking");
     });
+
+    it("clears stranded execution state back to idle", () => {
+      sm.onToolStart("Bash", { command: "npm test" });
+      sm.onMessageDelta();
+
+      sm.clearExecutionState();
+
+      expect(sm.getState()).toBe("idle");
+      expect(sm.getLabel()).toBeNull();
+      expect(sm.getDiagnostics()).toEqual({
+        activeToolCount: 0,
+        activeTools: [],
+        hasError: false,
+        hasWaiting: false,
+        isThinking: false,
+      });
+    });
   });
 
   describe("waiting state", () => {
@@ -133,6 +150,23 @@ describe("SessionStateMachine", () => {
       sm.onPermissionReplied();
       expect(sm.getState()).toBe("idle");
     });
+
+    it("preserves permission waiting when clearing execution without aborting", () => {
+      sm.onToolStart("Bash", { command: "npm test" });
+      sm.onPermissionAsked("Run bash?");
+
+      sm.clearExecutionState();
+
+      expect(sm.getState()).toBe("waiting");
+      expect(sm.getLabel()).toBe("Run bash?");
+      expect(sm.getDiagnostics()).toEqual({
+        activeToolCount: 0,
+        activeTools: [],
+        hasError: false,
+        hasWaiting: true,
+        isThinking: false,
+      });
+    });
   });
 
   describe("error state", () => {
@@ -146,6 +180,24 @@ describe("SessionStateMachine", () => {
       sm.onError("fail");
       sm.tick(5100);
       expect(sm.getState()).toBe("idle");
+    });
+
+    it("drops waiting and active tools before surfacing an abort", () => {
+      sm.onToolStart("Bash", { command: "npm test" });
+      sm.onPermissionAsked("Run bash?");
+
+      sm.clearExecutionState({ clearWaiting: true });
+      sm.onError("Aborted");
+
+      expect(sm.getState()).toBe("error");
+      expect(sm.getLabel()).toBe("Aborted");
+      expect(sm.getDiagnostics()).toEqual({
+        activeToolCount: 0,
+        activeTools: [],
+        hasError: true,
+        hasWaiting: false,
+        isThinking: false,
+      });
     });
   });
 
