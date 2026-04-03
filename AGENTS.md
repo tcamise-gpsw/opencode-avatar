@@ -110,6 +110,18 @@ This repo enforces both:
 - semantic PR titles via `.github/workflows/semantic-pr-title.yml`
 - conventional commit messages via `.github/workflows/commitlint.yml`
 
+When preparing a commit:
+
+- Review `git status`, the diff, and recent commit subjects before choosing the message.
+- Use a conventional commit in the form `<type>(<scope>): <summary>`.
+- Prefer scopes that match the area you changed, such as `app`, `plugin`, `repo`, `readme`, `docs`, or `ci`.
+
+When preparing a pull request:
+
+- Use a semantic PR title that matches the repo's commit conventions.
+- Follow `.github/pull_request_template.md` and fill in `Summary`, `Testing`, and `Checklist`.
+- Keep the PR body factual and include the exact validation commands you ran.
+
 Use formats like:
 
 - `feat(app): add maximize mode`
