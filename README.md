@@ -1,185 +1,111 @@
 # OpenCode Avatar Overlay
 
-`opencode-avatar` is a pnpm workspace that turns OpenCode activity into a desktop overlay.
+<img src="docs/robot-icon.svg" alt="OpenCode Avatar robot" width="160" />
 
-The current implementation has three parts:
+## Overview
 
-1. `plugin/`: an OpenCode plugin that tracks session state, token throughput, and tool activity, persists per-process snapshots under `~/.opencode-avatar/state/`, and publishes the merged view over WebSocket.
-2. `shared/`: the shared TypeScript protocol and state definitions used by both sides of the connection.
-3. `app/`: a Tauri 2 desktop shell that hosts a PixiJS renderer and connects to the plugin's WebSocket server.
+OpenCode Avatar Overlay is a desktop companion for OpenCode that shows active sessions as an always-on-top overlay.
 
-## Workspace Layout
+The overlay gives you a live view of what OpenCode is doing without switching back to the terminal.
+
+Current v1 behavior includes:
+
+- one robot per active session
+- live state changes for reading, editing, running, waiting, error, and idle states
+- token-rate flame effects
+- hover previews of the latest assistant response
+- prompt input and permission replies from the overlay
+
+## Installation
+
+It ships as two pieces:
+
+- a macOS desktop app that renders the overlay
+- an OpenCode plugin that publishes live session state to the app
+
+Most users should install from a published GitHub Release.
+
+If you are building from source instead, see the [Developer Guide](README-dev.md) and [Release Guide](docs/release.md).
+
+### Get the release artifacts
+
+- For published versions, download the `.dmg` and plugin `.zip` from [GitHub Releases](https://github.com/tcamise-gpsw/opencode-avatar/releases).
+- For a local build, run `corepack pnpm release:v1`. That writes the `.dmg` and plugin bundle into the local `release/` directory.
+
+### 1. Install the desktop app
+
+Install the packaged macOS app from the release `.dmg`.
+
+### 2. Install the plugin bundle
+
+Unzip the released `opencode-avatar-plugin_<version>.zip` into a stable location on disk.
+
+Example install location:
 
 ```text
-.
-├── app/      # Tauri 2 + Vite + PixiJS overlay app
-├── plugin/   # OpenCode plugin, state machine, token tracker, WS server
-├── shared/   # Shared protocol types and state mappings
-└── docs/     # Project documentation
+/Users/you/Library/Application Support/opencode-avatar/opencode-avatar-plugin
 ```
 
-## Architecture
+### 3. Register the plugin with OpenCode
 
-Runtime flow:
-
-```text
-OpenCode plugin <-> WebSocket <-> Tauri 2 + PixiJS app
-```
-
-- `shared/src/protocol.ts` defines avatar states plus the WebSocket message shapes used in both directions.
-- `plugin/src/index.ts` listens to OpenCode hooks, feeds `SessionStateMachine` and `TokenTracker`, writes each plugin instance's grouped snapshots to the shared state directory, and broadcasts the merged view through `AvatarWSServer`.
-- `app/src/ws-client.ts` reconnects to the plugin WebSocket, receives `session`/`state`/`sync`/`command.result`, and can send app commands (`prompt`, `permission.reply`) back to the plugin.
-- `app/src/renderer.ts` manages one robot per active session and uses `sprites.ts`, `robot.ts`, and `flames.ts` to render the overlay.
-
-Recent state-machine hardening:
-
-- Tool names are normalized case-insensitively (for example `read`, `Read`, `READ`) before state mapping and tool lifecycle matching.
-- The plugin emits info-level `session_state_summary` logs on major transitions (`tool.before`, `tool.after`, session/permission/error events) to make stuck-state diagnosis easier without full debug logging.
-
-## Interactive Reverse Channel (v1)
-
-The overlay now supports a reverse communication channel (app → plugin → OpenCode SDK):
-
-- **Last response preview:** hover a robot to see the latest assistant text snippet in the tooltip.
-- **Click-to-prompt:** click a robot to open an input panel and send text into that session.
-- **Permission popup:** when a session is waiting on permission, a popup appears near the robot with Allow/Deny.
-
-Protocol additions in `shared/src/protocol.ts`:
-
-- App → Plugin: `type: "command"` with `command: "prompt" | "permission.reply"`
-- Plugin → App: `type: "command.result"`
-- `SessionInfo` now includes `lastResponse` and `pendingPermission`.
-
-For multi-process OpenCode setups, cross-process command routing uses shared files in `~/.opencode-avatar/state/`:
-
-- `cmd-<requestId>.json`
-- `result-<requestId>.json`
-
-More detail lives in `docs/architecture.md`.
-
-## Prerequisites
-
-- Node.js with Corepack enabled
-- `pnpm` via Corepack
-- Rust toolchain for Tauri builds
-- Platform dependencies required by Tauri 2
-
-## Install
-
-```bash
-corepack pnpm install
-```
-
-## Run
-
-The plugin does **not** run as a standalone server process. It is loaded by OpenCode, and OpenCode executes the built artifact at `plugin/dist/index.js`.
-
-In one terminal, watch and rebuild the plugin package:
-
-```bash
-corepack pnpm dev:plugin
-```
-
-Register the plugin in your OpenCode config (`~/.config/opencode/config.json`), then start OpenCode so it loads `plugin/dist/index.js` and opens the avatar WebSocket server.
-
-Example config snippet:
+Add the unpacked plugin directory to `~/.config/opencode/config.json`:
 
 ```json
 {
   "plugin": [
-    "/Users/tcamise/gopro/opencode-avatar/plugin"
+    "/Users/you/Library/Application Support/opencode-avatar/opencode-avatar-plugin"
   ]
 }
 ```
 
-Once OpenCode is running with the plugin enabled, run the desktop overlay in another terminal:
+### 4. Start OpenCode
 
-```bash
-corepack pnpm --dir app tauri:dev
-```
+Start or restart OpenCode so it loads the plugin.
 
-If you only want the Vite frontend without the Tauri shell:
+The plugin opens a local WebSocket server on `ws://127.0.0.1:2728` by default.
 
-```bash
-corepack pnpm dev:app
-```
+### 5. Launch the desktop app
 
-Defaults expect the plugin WebSocket server on `ws://127.0.0.1:2728`.
+Open the installed OpenCode Avatar app.
 
-If you change plugin code, restart the relevant OpenCode processes after `plugin/dist/` has been rebuilt so they load the updated plugin runtime.
+If the plugin is running, the overlay should connect automatically and begin rendering active sessions.
 
 Expected success signals:
 
-- OpenCode loads the plugin and `~/.opencode-avatar/logs/plugin.log` contains `plugin_ready`
-- The overlay stops reconnecting and begins rendering robots for active sessions
+- the app opens without staying stuck in reconnect mode
+- robots appear when OpenCode sessions are active
+- the plugin log contains `plugin_ready`
 
-## Build
+## Usage
 
-Build all workspace packages:
+### Watch session state
 
-```bash
-corepack pnpm build
-```
+Each active OpenCode session appears as a robot in the overlay. The robot updates as the session changes state.
 
-Build the packaged Tauri app:
+### Hover for response preview
 
-```bash
-corepack pnpm --dir app tauri:build
-```
+Hover a robot to see a short preview of the latest assistant response.
 
-## Test
+### Click to send a prompt
 
-Run the workspace test suite:
+Click a robot to open the prompt input panel, type a message, and send it back to that session.
 
-```bash
-corepack pnpm test
-```
+### Reply to permission requests
 
-The current automated tests live in `plugin/test/` and cover the state machine, token tracking, shared session store, and WebSocket protocol.
+When a session is waiting on permission, the overlay shows an Allow/Deny popup next to the robot.
 
-## Environment Variables
+## Troubleshooting
 
-### Plugin
+- Confirm OpenCode is running with the plugin enabled.
+- Confirm the plugin path in `~/.config/opencode/config.json` points to the unpacked `opencode-avatar-plugin/` directory.
+- Confirm the overlay can connect to `ws://127.0.0.1:2728`.
+- Check plugin logs at `~/.opencode-avatar/logs/plugin.log`.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `AVATAR_WS_PORT` | `2728` | Port used by the plugin WebSocket server. |
-| `AVATAR_INSTANCE_ID` | random UUID per process | Optional stable ID for a plugin process when writing shared state snapshots. |
-| `AVATAR_LOG_LEVEL` | `info` | Plugin log verbosity: `debug`, `info`, `warn`, or `error`. |
-| `AVATAR_LOG_STDERR` | unset | When set to `1`, mirrors plugin logs to stderr in addition to `~/.opencode-avatar/logs/plugin.log`. |
+See the [Troubleshooting Guide](docs/troubleshooting.md) for more detail.
 
-### App
+## More Information
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `VITE_AVATAR_WS_URL` | `ws://127.0.0.1:2728` | WebSocket URL used by the PixiJS client. |
-| `VITE_LOG_LEVEL` | `info` | Frontend console log verbosity: `debug`, `info`, `warn`, or `error`. |
-| `VITE_DEBUG` | unset | Enables frontend debug mode when set to `1`. |
-
-Example:
-
-```bash
-export AVATAR_WS_PORT=3001
-export AVATAR_LOG_LEVEL=debug
-
-# Launch OpenCode in the same environment so the plugin inherits these values.
-VITE_AVATAR_WS_URL=ws://127.0.0.1:3001 VITE_LOG_LEVEL=debug VITE_DEBUG=1 corepack pnpm --dir app tauri:dev
-```
-
-To change the plugin WebSocket port, export `AVATAR_WS_PORT` in the environment used to launch OpenCode.
-
-## Logging
-
-- The plugin writes newline-delimited JSON logs to `~/.opencode-avatar/logs/plugin.log`.
-- The plugin also writes per-process session snapshots to `~/.opencode-avatar/state/` so one plugin instance can merge sessions from multiple OpenCode processes.
-- The plugin now also writes cross-process command and result files in that state directory (`cmd-*.json`, `result-*.json`).
-- The frontend TypeScript logger currently writes structured logs to the browser console and respects `VITE_LOG_LEVEL` and `VITE_DEBUG`.
-- The Tauri Rust shell enables `tauri-plugin-log` in debug builds, but this repo does not currently configure the frontend app to persist its own logs into `~/.opencode-avatar/logs/`.
-
-For troubleshooting workflows (including `session_state_summary` interpretation and stuck-state triage), see `docs/troubleshooting.md`.
-
-## Current Notes
-
-- This documentation describes the repository as it exists now, not the original design plan.
-- The plugin and app are intentionally decoupled through the shared protocol and local WebSocket boundary.
-- The app is currently centered on rendering session robots, token-driven flame effects, and connection state, rather than a broader control surface.
+- [Developer Guide](README-dev.md)
+- [Release Guide](docs/release.md)
+- [Configuration Guide](docs/configuration.md)
+- [Troubleshooting Guide](docs/troubleshooting.md)
