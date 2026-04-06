@@ -55,7 +55,7 @@ jobs:
 
       - name: Read version
         id: version
-        run: echo "value=$(node -e "console.log(require('./app/src-tauri/tauri.conf.json').version)")" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(node -e 'console.log(require("./app/src-tauri/tauri.conf.json").version)')" >> "$GITHUB_OUTPUT"
 
       - name: Build workspace
         run: corepack pnpm build

@@ -30,14 +30,27 @@ fi
 # ── Install the app ────────────────────────────────────────────────────────
 
 printf 'Installing %s to /Applications...\n' "$APP_NAME"
-mount_point=$(hdiutil attach "$dmg" -nobrowse -noverify -quiet | grep '/Volumes' | awk -F'\t' '{print $NF}')
+mount_point="$(mktemp -d "/tmp/opencode-avatar-dmg.XXXXXX")"
+hdiutil attach "$dmg" -nobrowse -noverify -quiet -mountpoint "$mount_point"
+trap 'hdiutil detach "$mount_point" -quiet 2>/dev/null' EXIT
 
-if [ -d "/Applications/$APP_NAME" ]; then
-	rm -rf "/Applications/$APP_NAME"
+run=()
+if [ ! -w /Applications ]; then
+	printf '  Elevated privileges required for /Applications.\n'
+	sudo -v || {
+		printf 'Error: failed to acquire sudo.\n' >&2
+		exit 1
+	}
+	run=(sudo)
 fi
 
-cp -R "$mount_point/$APP_NAME" /Applications/
+if [ -d "/Applications/$APP_NAME" ]; then
+	"${run[@]}" rm -rf "/Applications/$APP_NAME"
+fi
+
+"${run[@]}" cp -R "$mount_point/$APP_NAME" /Applications/
 hdiutil detach "$mount_point" -quiet
+trap - EXIT
 printf '  Done.\n'
 
 # ── Install the plugin ─────────────────────────────────────────────────────
