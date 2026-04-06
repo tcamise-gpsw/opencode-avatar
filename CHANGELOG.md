@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/tcamise-gpsw/opencode-avatar/compare/v0.3.0...v0.3.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* **ci:** build and upload release assets before publishing ([2c19114](https://github.com/tcamise-gpsw/opencode-avatar/commit/2c191143f767c18d7c95d13984f63a25a7e4a5da))
+
 ## [0.3.0](https://github.com/tcamise-gpsw/opencode-avatar/compare/v0.2.1...v0.3.0) (2026-04-06)
 
 
