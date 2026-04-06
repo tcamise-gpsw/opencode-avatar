@@ -18,53 +18,34 @@ Current v1 behavior includes:
 
 ## Installation
 
-It ships as two pieces:
-
-- a macOS desktop app that renders the overlay
-- an OpenCode plugin that publishes live session state to the app
-
-Most users should install from a published GitHub Release.
+It ships as a single `.zip` containing the macOS desktop app, the OpenCode plugin, and an install script.
 
 If you are building from source instead, see the [Developer Guide](README-dev.md) and [Release Guide](docs/release.md).
 
-### Get the release artifacts
+### 1. Download and unzip
 
-- For published versions, download the `.dmg` and plugin `.zip` from [GitHub Releases](https://github.com/tcamise-gpsw/opencode-avatar/releases).
-- For a local build, run `corepack pnpm release:v1`. That writes the `.dmg` and plugin bundle into the local `release/` directory.
+Download `opencode-avatar_<version>.zip` from [GitHub Releases](https://github.com/tcamise-gpsw/opencode-avatar/releases) and unzip it.
 
-### 1. Install the desktop app
+### 2. Run the install script
 
-Install the packaged macOS app from the release `.dmg`.
-
-### 2. Install the plugin bundle
-
-Unzip the released `opencode-avatar-plugin_<version>.zip` into a stable location on disk.
-
-Example install location:
-
-```text
-/Users/you/Library/Application Support/opencode-avatar/opencode-avatar-plugin
+```bash
+cd opencode-avatar
+./install.sh
 ```
 
-### 3. Register the plugin with OpenCode
+The script:
 
-Add the unpacked plugin directory to `~/.config/opencode/config.json`:
+- installs the app to `/Applications`
+- copies the plugin to `~/Library/Application Support/opencode-avatar/`
+- registers the plugin in `~/.config/opencode/config.json`
 
-```json
-{
-  "plugin": [
-    "/Users/you/Library/Application Support/opencode-avatar/opencode-avatar-plugin"
-  ]
-}
-```
-
-### 4. Start OpenCode
+### 3. Start OpenCode
 
 Start or restart OpenCode so it loads the plugin.
 
 The plugin opens a local WebSocket server on `ws://127.0.0.1:2728` by default.
 
-### 5. Launch the desktop app
+### 4. Launch the desktop app
 
 Open the installed OpenCode Avatar app.
 
@@ -75,6 +56,8 @@ Expected success signals:
 - the app opens without staying stuck in reconnect mode
 - robots appear when OpenCode sessions are active
 - the plugin log contains `plugin_ready`
+
+To update, download the latest release and run `./install.sh` again.
 
 ## Usage
 
