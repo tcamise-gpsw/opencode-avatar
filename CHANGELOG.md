@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/tcamise-gpsw/opencode-avatar/compare/v0.2.0...v0.2.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* **plugin:** reset leadership retry state on non-EADDRINUSE errors ([7efcacf](https://github.com/tcamise-gpsw/opencode-avatar/commit/7efcacfdba1fb35d01a28fc2cd25ac3328e1a40a))
+* **plugin:** retry websocket leadership after leader exit ([7efcacf](https://github.com/tcamise-gpsw/opencode-avatar/commit/7efcacfdba1fb35d01a28fc2cd25ac3328e1a40a))
+
 ## [0.2.0](https://github.com/tcamise-gpsw/opencode-avatar/compare/v0.1.0...v0.2.0) (2026-04-03)
 
 
