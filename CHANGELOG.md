@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/tcamise-gpsw/opencode-avatar/compare/v0.5.0...v0.6.0) (2026-04-06)
+
+
+### Features
+
+* **repo:** bundle install script with release artifacts ([#13](https://github.com/tcamise-gpsw/opencode-avatar/issues/13)) ([7a85876](https://github.com/tcamise-gpsw/opencode-avatar/commit/7a85876aaaa82d2eae6f969a191dca6131617d9a))
+
 ## [0.5.0](https://github.com/tcamise-gpsw/opencode-avatar/compare/v0.4.0...v0.5.0) (2026-04-06)
 
 
