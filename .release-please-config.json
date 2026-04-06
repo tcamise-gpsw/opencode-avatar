@@ -4,7 +4,6 @@
     ".": {
       "release-type": "simple",
       "include-component-in-tag": false,
-      "draft": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
