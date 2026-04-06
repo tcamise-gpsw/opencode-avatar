@@ -53,11 +53,34 @@ jobs:
       - name: Install dependencies
         run: corepack pnpm install --frozen-lockfile
 
-      - name: Build release artifacts
-        run: corepack pnpm release:v1
+      - name: Read version
+        id: version
+        run: echo "value=$(node -e "console.log(require('./app/src-tauri/tauri.conf.json').version)")" >> "$GITHUB_OUTPUT"
+
+      - name: Build workspace
+        run: corepack pnpm build
+
+      - name: Build Tauri app
+        run: corepack pnpm --dir app tauri:build
+
+      - name: Deploy plugin bundle
+        run: |
+          corepack pnpm --filter @opencode-avatar/plugin --prod deploy --legacy release/opencode-avatar-plugin
+          rm -rf release/opencode-avatar-plugin/{src,test,tsconfig.json,vitest.config.ts}
+
+      - name: Bundle release zip
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          mkdir -p release/opencode-avatar
+          cp install.sh release/opencode-avatar/
+          cp app/src-tauri/target/release/bundle/dmg/*.dmg release/opencode-avatar/
+          cp -R release/opencode-avatar-plugin release/opencode-avatar/
+          cd release
+          zip -r "opencode-avatar_${VERSION}.zip" opencode-avatar/
 
       - name: Upload release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
-        run: gh release upload "$TAG_NAME" release/*.dmg release/*.zip --clobber
+        run: gh release upload "$TAG_NAME" release/opencode-avatar_*.zip --clobber

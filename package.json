@@ -5,7 +5,6 @@
   "scripts": {
     "test": "corepack pnpm -r --if-present test",
     "build": "corepack pnpm -r --if-present build",
-    "release:v1": "bash ./scripts/release-v1.sh",
     "dev:plugin": "corepack pnpm --filter @opencode-avatar/plugin dev",
     "dev:app": "corepack pnpm --filter @opencode-avatar/app dev"
   },

@@ -80,15 +80,6 @@ Build the packaged Tauri app only:
 corepack pnpm --dir app tauri:build
 ```
 
-Build the v1 release bundle:
-
-```bash
-corepack pnpm release:v1
-```
-
-That command writes local release artifacts to the local `release/` directory.
-That directory is local build output and is ignored by git.
-
 ## Important Dev Note
 
 After plugin source changes:

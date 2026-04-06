@@ -19,7 +19,6 @@ Shared protocol types live in `shared/`.
 - `plugin/`: OpenCode plugin runtime, session state machine, token tracking, WS server
 - `shared/`: shared state and protocol definitions
 - `docs/`: release, configuration, architecture, troubleshooting, and assets
-- `scripts/`: local release helpers
 - `.github/workflows/`: CI, commit enforcement, release automation
 
 Primary docs:
@@ -69,14 +68,6 @@ Run the Vite frontend only:
 corepack pnpm dev:app
 ```
 
-Build the local v1 release bundle:
-
-```bash
-corepack pnpm release:v1
-```
-
-That command writes local artifacts into the ignored `release/` directory.
-
 ## Runtime Notes
 
 - The plugin is not a standalone daemon. OpenCode loads `plugin/dist/index.js`.
@@ -87,17 +78,14 @@ That command writes local artifacts into the ignored `release/` directory.
 
 ## Release Model
 
-V1 is released as two artifacts:
-
-- a macOS `.dmg` for the desktop app
-- a plugin `.zip` that the user unpacks and registers in OpenCode config
+V1 is released as a single `opencode-avatar_<version>.zip` containing the macOS app `.dmg`, the plugin bundle, and an install script.
 
 Automated release flow:
 
 - conventional commits feed `release-please`
 - `release-please` opens/updates a release PR and bumps versions in the repo
 - merging that release PR creates the GitHub Release and tag
-- the release asset workflow builds and uploads the `.dmg` and plugin `.zip`
+- the release asset workflow builds and uploads the bundled `.zip`
 
 Published artifacts are distributed from:
 
@@ -152,8 +140,8 @@ corepack pnpm --dir app tauri icon ../docs/robot-icon.svg
 - `ci.yml`: workspace tests/build plus macOS Tauri shell validation
 - `commitlint.yml`: conventional commit enforcement
 - `semantic-pr-title.yml`: PR title enforcement
-- `release-please.yml`: automated versioning and release PRs
-- `release-assets.yml`: build/upload release artifacts for published GitHub Releases
+- `release-please.yml`: automated versioning, release PRs, and release asset builds
+- `renovate.yml`: dependency update automation
 
 ## Cautions
 
