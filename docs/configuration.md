@@ -7,7 +7,7 @@ OpenCode loads the plugin from a filesystem path. Add the plugin directory to `~
 ```json
 {
   "plugin": [
-    "/Users/tcamise/gopro/opencode-avatar/plugin"
+    "/absolute/path/to/opencode-avatar/plugin"
   ]
 }
 ```

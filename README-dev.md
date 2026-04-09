@@ -29,7 +29,7 @@ Register the local plugin in `~/.config/opencode/config.json`:
 ```json
 {
   "plugin": [
-    "/Users/tcamise/gopro/opencode-avatar/plugin"
+    "/absolute/path/to/opencode-avatar/plugin"
   ]
 }
 ```

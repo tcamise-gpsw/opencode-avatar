@@ -1,6 +1,12 @@
 # OpenCode Avatar Overlay
 
-<img src="docs/robot-icon.svg" alt="OpenCode Avatar robot" width="160" />
+<p align="center">
+  <img src="docs/robot-banner.svg" alt="OpenCode Avatar robots showing idle, thinking, reading, editing, running, waiting, and error states" width="100%" />
+</p>
+
+Does your OpenCode session need some personality? Are you sick of alt-tabbing back to the terminal just to see if your agent is still thinking, stuck on a permission prompt, or burning tokens like it's going out of style? Is your workflow missing a tiny robot companion that actually tells you what's going on?
+
+Then **OpenCode Avatar** is the project for you.
 
 ## Overview
 
@@ -8,13 +14,14 @@ OpenCode Avatar Overlay is a desktop companion for OpenCode that shows active se
 
 The overlay gives you a live view of what OpenCode is doing without switching back to the terminal.
 
-Current v1 behavior includes:
+Current behavior includes:
 
 - one robot per active session
 - live state changes for reading, editing, running, waiting, error, and idle states
 - token-rate flame effects
 - hover previews of the latest assistant response
 - prompt input and permission replies from the overlay
+- a maximize option to view the status at a glance when you're walking by your computer
 
 ## Installation
 
@@ -60,6 +67,10 @@ Expected success signals:
 To update, download the latest release and run `./install.sh` again.
 
 ## Usage
+
+<p align="center">
+  <img src="docs/demo.gif" alt="OpenCode Avatar overlay demo" width="600" />
+</p>
 
 ### Watch session state
 
